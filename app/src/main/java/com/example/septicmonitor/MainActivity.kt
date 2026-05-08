@@ -3,9 +3,12 @@ package com.example.septicmonitor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -36,11 +40,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -56,30 +61,20 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun SepticMonitorApp() {
-    var showSplash by remember { mutableStateOf(true) }
+    var showCustomSplash by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        delay(20000)
-        showSplash = false
+        delay(12000)
+        showCustomSplash = false
     }
 
     MaterialTheme(
         colorScheme = darkColorScheme()
     ) {
-        if (showSplash) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF101820))
-                    .clickable { showSplash = false },
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                    contentDescription = "Splash Logo",
-                    modifier = Modifier.size(200.dp)
-                )
-            }
+        if (showCustomSplash) {
+            CustomSplashScreen(
+                onSkip = { showCustomSplash = false }
+            )
         } else {
             Surface(
                 modifier = Modifier.fillMaxSize(),
@@ -87,6 +82,64 @@ fun SepticMonitorApp() {
             ) {
                 SepticDashboard()
             }
+        }
+    }
+}
+
+@Composable
+fun CustomSplashScreen(
+    onSkip: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF101820))
+            .clickable { onSkip() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.septic_monitor_icon_full),
+                contentDescription = "Septic Monitor Splash Image",
+                modifier = Modifier
+                    .fillMaxWidth(0.78f)
+                    .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp),
+                contentScale = ContentScale.Fit
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "Septic Monitor",
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Tank Status & Monitoring",
+                fontSize = 16.sp,
+                color = Color(0xFFB8C7D9),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Tap anywhere to continue",
+                fontSize = 13.sp,
+                color = Color(0xFF7F95A8),
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
@@ -103,6 +156,7 @@ fun SepticDashboard() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
