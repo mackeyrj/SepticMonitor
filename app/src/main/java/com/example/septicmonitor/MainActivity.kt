@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -156,17 +157,11 @@ fun SepticDashboard() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .safeDrawingPadding()
             .verticalScroll(rememberScrollState())
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "Septic Monitor",
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
-
         Text(
             text = "Wi-Fi connected • Last reading: 2 minutes ago",
             fontSize = 15.sp,
