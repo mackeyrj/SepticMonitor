@@ -18,10 +18,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -29,7 +28,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -147,8 +145,6 @@ fun CustomSplashScreen(
 
 @Composable
 fun SepticDashboard() {
-    var pumpEnabled by remember { mutableStateOf(false) }
-
     val distanceInches = 42
     val tankPercent = 63
     val statusText = "Normal"
@@ -180,10 +176,7 @@ fun SepticDashboard() {
             distanceInches = distanceInches
         )
 
-        PumpControlCard(
-            pumpEnabled = pumpEnabled,
-            onPumpChanged = { pumpEnabled = it }
-        )
+        PumpPowerMonitorCard()
 
         AlertCard(
             alarmText = alarmText
@@ -295,10 +288,7 @@ fun TankLevelCard(
 }
 
 @Composable
-fun PumpControlCard(
-    pumpEnabled: Boolean,
-    onPumpChanged: (Boolean) -> Unit
-) {
+fun PumpPowerMonitorCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -308,7 +298,7 @@ fun PumpControlCard(
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -318,24 +308,44 @@ fun PumpControlCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
-                        text = "Pump Control",
+                        text = "Pump Power Monitor",
                         color = Color.White,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold
                     )
 
                     Text(
-                        text = if (pumpEnabled) "Pump smart plug is ON" else "Pump smart plug is OFF",
+                        text = "Smart plug is used for monitoring only",
                         color = Color(0xFFB8C7D9),
-                        fontSize = 15.sp
+                        fontSize = 14.sp
                     )
                 }
 
-                Switch(
-                    checked = pumpEnabled,
-                    onCheckedChange = onPumpChanged
+                StatusPill(
+                    text = "ONLINE",
+                    color = Color(0xFF2ECC71)
                 )
             }
+
+            PumpInfoRow(
+                label = "Power",
+                value = "Available"
+            )
+
+            PumpInfoRow(
+                label = "Pump",
+                value = "Idle"
+            )
+
+            PumpInfoRow(
+                label = "Last run",
+                value = "Today 8:42 AM"
+            )
+
+            PumpInfoRow(
+                label = "Run duration",
+                value = "41 seconds"
+            )
 
             Button(
                 onClick = {
@@ -345,7 +355,59 @@ fun PumpControlCard(
             ) {
                 Text("Refresh Reading")
             }
+
+            Text(
+                text = "Leave the pump circuit powered for normal operation.",
+                color = Color(0xFFFFD54F),
+                fontSize = 13.sp
+            )
         }
+    }
+}
+
+@Composable
+fun PumpInfoRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            color = Color(0xFFB8C7D9),
+            fontSize = 15.sp
+        )
+
+        Text(
+            text = value,
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+fun StatusPill(
+    text: String,
+    color: Color
+) {
+    Box(
+        modifier = Modifier
+            .background(
+                color = color.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(50)
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
