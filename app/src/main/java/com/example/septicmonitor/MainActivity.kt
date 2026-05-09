@@ -3,6 +3,9 @@ package com.example.septicmonitor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.material3.ExperimentalMaterial3Api
+import com.example.septicmonitor.ui.theme.SepticMonitorTheme
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -50,10 +53,13 @@ import kotlinx.coroutines.delay
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         setContent {
-            SepticMonitorApp()
+            SepticMonitorTheme {
+                SepticMonitorApp()
+            }
         }
     }
 }
@@ -63,24 +69,20 @@ fun SepticMonitorApp() {
     var showCustomSplash by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        delay(12000)
+        delay(1200)
         showCustomSplash = false
     }
 
-    MaterialTheme(
-        colorScheme = darkColorScheme()
-    ) {
-        if (showCustomSplash) {
-            CustomSplashScreen(
-                onSkip = { showCustomSplash = false }
-            )
-        } else {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF101820)
-            ) {
-                SepticDashboard()
-            }
+    if (showCustomSplash) {
+        CustomSplashScreen(
+            onSkip = { showCustomSplash = false }
+        )
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF101820)
+        ) {
+            SepticDashboard()
         }
     }
 }
@@ -239,6 +241,7 @@ fun StatusCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TankLevelCard(
     tankPercent: Int,
@@ -270,7 +273,7 @@ fun TankLevelCard(
             )
 
             LinearProgressIndicator(
-                progress = tankPercent / 100f,
+                progress = { tankPercent / 100f },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(12.dp),
