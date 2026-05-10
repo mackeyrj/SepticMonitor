@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    // alias(libs.plugins.google.services) // Temporarily paused until you have the JSON file
+    alias(libs.plugins.google.services) // Officially re-enabled!
 }
 
 android {
@@ -62,7 +62,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    // Firebase (Paused)
-    // implementation(platform(libs.firebase.bom))
-    // implementation(libs.firebase.database)
+    // Firebase (Officially re-enabled!)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.database)
 }

@@ -54,6 +54,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.collectAsState
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,9 +86,64 @@ class SepticViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(SepticState())
     val uiState: StateFlow<SepticState> = _uiState.asStateFlow()
 
+    private val database = FirebaseDatabase.getInstance("https://septicmonitor-61662-default-rtdb.firebaseio.com").getReference("status")
+
     init {
-        // Initial mock data - later we will fetch this from ESP32/Cloud
+        // Initial mock data
         refreshData()
+
+        println("SepticMonitor: Initializing Firebase connection...")
+
+        // Start listening to Firebase for real-time updates
+        setupFirebaseListener()
+    }
+
+    private fun setupFirebaseListener() {
+        database.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                println("SepticMonitor: Data changed! Snapshot: ${snapshot.value}")
+                
+                // This runs whenever you change data in the Firebase Console!
+                val tankPercent = snapshot.child("tank_percent").getValue(Int::class.java)
+                val distanceInches = snapshot.child("distance_inches").getValue(Int::class.java) ?: 0
+                val pumpStatus = snapshot.child("pump_status").getValue(String::class.java) ?: "Idle"
+                val pumpPower = snapshot.child("pump_power").getValue(String::class.java) ?: "Available"
+
+                if (tankPercent == null) {
+                    println("SepticMonitor: tank_percent is null. Make sure it is inside 'status' folder.")
+                    return
+                }
+
+                val newStatus = when {
+                    tankPercent > 90 -> "CRITICAL"
+                    tankPercent > 75 -> "High"
+                    else -> "Normal"
+                }
+
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        distanceInches = distanceInches,
+                        tankPercent = tankPercent,
+                        statusText = newStatus,
+                        pumpStatus = pumpStatus,
+                        pumpPowerStatus = pumpPower,
+                        lastReadingText = "Live from Cloud",
+                        isWifiConnected = true,
+                        recentReadings = (listOf(
+                            RecentReading(
+                                SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()),
+                                "$tankPercent% full",
+                                newStatus
+                            )
+                        ) + currentState.recentReadings).take(5)
+                    )
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                println("SepticMonitor: Firebase Error: ${error.message}")
+            }
+        })
     }
 
     fun refreshData() {
