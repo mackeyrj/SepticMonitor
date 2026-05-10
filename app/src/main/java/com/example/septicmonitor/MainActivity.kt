@@ -53,9 +53,67 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+data class SepticState(
+    val distanceInches: Int = 0,
+    val tankPercent: Int = 0,
+    val statusText: String = "Unknown",
+    val alarmText: String = "None",
+    val lastReadingText: String = "Never",
+    val pumpPowerStatus: String = "Offline",
+    val pumpStatus: String = "Unknown",
+    val pumpLastRun: String = "N/A",
+    val pumpRunDuration: String = "N/A",
+    val isWifiConnected: Boolean = false,
+    val recentReadings: List<RecentReading> = emptyList()
+)
+
+class SepticViewModel : ViewModel() {
+    private val _uiState = MutableStateFlow(SepticState())
+    val uiState: StateFlow<SepticState> = _uiState.asStateFlow()
+
+    init {
+        // Initial mock data - later we will fetch this from ESP32/Cloud
+        refreshData()
+    }
+
+    fun refreshData() {
+        _uiState.update { currentState ->
+            // Simulating a reading change
+            val newPercent = (currentState.tankPercent + 5).let { if (it > 100) 0 else it }
+            val newDistance = 60 - (newPercent * 0.4).toInt() // Simulate distance decreasing as tank fills
+            
+            val newStatus = when {
+                newPercent > 90 -> "CRITICAL"
+                newPercent > 75 -> "High"
+                else -> "Normal"
+            }
+
+            currentState.copy(
+                distanceInches = newDistance,
+                tankPercent = newPercent,
+                statusText = newStatus,
+                lastReadingText = "Just now (Simulated)",
+                pumpPowerStatus = if (newPercent > 50) "Active" else "Available",
+                pumpStatus = if (newPercent > 50) "Pumping..." else "Idle",
+                isWifiConnected = true,
+                recentReadings = listOf(
+                    RecentReading("Now", "$newPercent% full", newStatus)
+                ) + currentState.recentReadings.take(4)
+            )
+        }
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,8 +136,9 @@ data class RecentReading(
 )
 
 @Composable
-fun SepticMonitorApp() {
+fun SepticMonitorApp(viewModel: SepticViewModel = viewModel()) {
     var showCustomSplash by remember { mutableStateOf(true) }
+    val uiState by viewModel.uiState.collectAsState()
 
     LaunchedEffect(Unit) {
         delay(12000)
@@ -95,7 +154,7 @@ fun SepticMonitorApp() {
             modifier = Modifier.fillMaxSize(),
             color = Color(0xFF101820)
         ) {
-            SepticDashboard()
+            SepticDashboard(uiState, onRefresh = { viewModel.refreshData() })
         }
     }
 }
@@ -159,22 +218,10 @@ fun CustomSplashScreen(
 }
 
 @Composable
-fun SepticDashboard() {
-    val distanceInches = 42
-    val tankPercent = 63
-    val statusText = "Normal"
-    val alarmText = "No alarm"
-    val lastReadingText = "2 minutes ago"
-    val pumpPowerStatus = "Available"
-    val pumpStatus = "Idle"
-    val pumpLastRun = "Today 8:42 AM"
-    val pumpRunDuration = "41 seconds"
-    val recentReadings = listOf(
-        RecentReading("9:12 AM", "63% full", "Normal"),
-        RecentReading("8:12 AM", "62% full", "Normal"),
-        RecentReading("7:12 AM", "61% full", "Normal")
-    )
-
+fun SepticDashboard(
+    state: SepticState,
+    onRefresh: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -184,45 +231,47 @@ fun SepticDashboard() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Wi-Fi connected • Last reading: $lastReadingText",
+            text = if (state.isWifiConnected) "Wi-Fi connected • Last reading: ${state.lastReadingText}" 
+                   else "Offline • Last reading: ${state.lastReadingText}",
             fontSize = 15.sp,
             color = Color(0xFFB8C7D9)
         )
 
         StatusCard(
             title = "System Status",
-            mainValue = statusText,
+            mainValue = state.statusText,
             detail = "Tank level is within the safe range",
             color = Color(0xFF2ECC71)
         )
 
         TankLevelCard(
-            tankPercent = tankPercent,
-            distanceInches = distanceInches
+            tankPercent = state.tankPercent,
+            distanceInches = state.distanceInches
         )
 
         PumpPowerMonitorCard(
-            pumpPowerStatus = pumpPowerStatus,
-            pumpStatus = pumpStatus,
-            pumpLastRun = pumpLastRun,
-            pumpRunDuration = pumpRunDuration
+            pumpPowerStatus = state.pumpPowerStatus,
+            pumpStatus = state.pumpStatus,
+            pumpLastRun = state.pumpLastRun,
+            pumpRunDuration = state.pumpRunDuration,
+            onRefresh = onRefresh
         )
 
         AlertCard(
-            alarmText = alarmText
+            alarmText = state.alarmText
         )
 
         HistoryCard(
-            tankPercent = tankPercent,
-            distanceInches = distanceInches,
-            statusText = statusText,
-            alarmText = alarmText,
-            lastReadingText = lastReadingText,
-            pumpPowerStatus = pumpPowerStatus,
-            pumpStatus = pumpStatus,
-            pumpLastRun = pumpLastRun,
-            pumpRunDuration = pumpRunDuration,
-            recentReadings = recentReadings
+            tankPercent = state.tankPercent,
+            distanceInches = state.distanceInches,
+            statusText = state.statusText,
+            alarmText = state.alarmText,
+            lastReadingText = state.lastReadingText,
+            pumpPowerStatus = state.pumpPowerStatus,
+            pumpStatus = state.pumpStatus,
+            pumpLastRun = state.pumpLastRun,
+            pumpRunDuration = state.pumpRunDuration,
+            recentReadings = state.recentReadings
         )
     }
 }
@@ -334,7 +383,8 @@ fun PumpPowerMonitorCard(
     pumpPowerStatus: String,
     pumpStatus: String,
     pumpLastRun: String,
-    pumpRunDuration: String
+    pumpRunDuration: String,
+    onRefresh: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -395,9 +445,7 @@ fun PumpPowerMonitorCard(
             )
 
             Button(
-                onClick = {
-                    // Later this will request a fresh reading from the ESP32.
-                },
+                onClick = onRefresh,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Refresh Reading")
