@@ -1,5 +1,8 @@
 package com.example.septicmonitor
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -43,12 +46,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,6 +70,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+data class RecentReading(
+    val time: String,
+    val level: String,
+    val status: String
+)
 
 @Composable
 fun SepticMonitorApp() {
@@ -151,6 +164,16 @@ fun SepticDashboard() {
     val tankPercent = 63
     val statusText = "Normal"
     val alarmText = "No alarm"
+    val lastReadingText = "2 minutes ago"
+    val pumpPowerStatus = "Available"
+    val pumpStatus = "Idle"
+    val pumpLastRun = "Today 8:42 AM"
+    val pumpRunDuration = "41 seconds"
+    val recentReadings = listOf(
+        RecentReading("9:12 AM", "63% full", "Normal"),
+        RecentReading("8:12 AM", "62% full", "Normal"),
+        RecentReading("7:12 AM", "61% full", "Normal")
+    )
 
     Column(
         modifier = Modifier
@@ -161,7 +184,7 @@ fun SepticDashboard() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Wi-Fi connected • Last reading: 2 minutes ago",
+            text = "Wi-Fi connected • Last reading: $lastReadingText",
             fontSize = 15.sp,
             color = Color(0xFFB8C7D9)
         )
@@ -178,13 +201,29 @@ fun SepticDashboard() {
             distanceInches = distanceInches
         )
 
-        PumpPowerMonitorCard()
+        PumpPowerMonitorCard(
+            pumpPowerStatus = pumpPowerStatus,
+            pumpStatus = pumpStatus,
+            pumpLastRun = pumpLastRun,
+            pumpRunDuration = pumpRunDuration
+        )
 
         AlertCard(
             alarmText = alarmText
         )
 
-        HistoryCard()
+        HistoryCard(
+            tankPercent = tankPercent,
+            distanceInches = distanceInches,
+            statusText = statusText,
+            alarmText = alarmText,
+            lastReadingText = lastReadingText,
+            pumpPowerStatus = pumpPowerStatus,
+            pumpStatus = pumpStatus,
+            pumpLastRun = pumpLastRun,
+            pumpRunDuration = pumpRunDuration,
+            recentReadings = recentReadings
+        )
     }
 }
 
@@ -291,7 +330,12 @@ fun TankLevelCard(
 }
 
 @Composable
-fun PumpPowerMonitorCard() {
+fun PumpPowerMonitorCard(
+    pumpPowerStatus: String,
+    pumpStatus: String,
+    pumpLastRun: String,
+    pumpRunDuration: String
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -332,22 +376,22 @@ fun PumpPowerMonitorCard() {
 
             PumpInfoRow(
                 label = "Power",
-                value = "Available"
+                value = pumpPowerStatus
             )
 
             PumpInfoRow(
                 label = "Pump",
-                value = "Idle"
+                value = pumpStatus
             )
 
             PumpInfoRow(
                 label = "Last run",
-                value = "Today 8:42 AM"
+                value = pumpLastRun
             )
 
             PumpInfoRow(
                 label = "Run duration",
-                value = "41 seconds"
+                value = pumpRunDuration
             )
 
             Button(
@@ -447,7 +491,20 @@ fun AlertCard(
 }
 
 @Composable
-fun HistoryCard() {
+fun HistoryCard(
+    tankPercent: Int,
+    distanceInches: Int,
+    statusText: String,
+    alarmText: String,
+    lastReadingText: String,
+    pumpPowerStatus: String,
+    pumpStatus: String,
+    pumpLastRun: String,
+    pumpRunDuration: String,
+    recentReadings: List<RecentReading>
+) {
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -466,9 +523,32 @@ fun HistoryCard() {
                 fontWeight = FontWeight.Bold
             )
 
-            HistoryRow("9:12 AM", "63% full", "Normal")
-            HistoryRow("8:12 AM", "62% full", "Normal")
-            HistoryRow("7:12 AM", "61% full", "Normal")
+            recentReadings.forEach { reading ->
+                HistoryRow(reading.time, reading.level, reading.status)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    emailDailyReport(
+                        context = context,
+                        tankPercent = tankPercent,
+                        distanceInches = distanceInches,
+                        statusText = statusText,
+                        alarmText = alarmText,
+                        lastReadingText = lastReadingText,
+                        pumpPowerStatus = pumpPowerStatus,
+                        pumpStatus = pumpStatus,
+                        pumpLastRun = pumpLastRun,
+                        pumpRunDuration = pumpRunDuration,
+                        recentReadings = recentReadings
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Email Today's Report")
+            }
         }
     }
 }
@@ -501,4 +581,87 @@ fun HistoryRow(
             fontSize = 14.sp
         )
     }
+}
+
+fun emailDailyReport(
+    context: Context,
+    tankPercent: Int,
+    distanceInches: Int,
+    statusText: String,
+    alarmText: String,
+    lastReadingText: String,
+    pumpPowerStatus: String,
+    pumpStatus: String,
+    pumpLastRun: String,
+    pumpRunDuration: String,
+    recentReadings: List<RecentReading>
+) {
+    val reportDate = SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date())
+    val reportGeneratedAt = SimpleDateFormat("MMM d, yyyy h:mm a", Locale.getDefault()).format(Date())
+    val subject = "Septic Monitor Daily Report - $reportDate"
+    val body = buildDailyReport(
+        reportDate = reportDate,
+        reportGeneratedAt = reportGeneratedAt,
+        tankPercent = tankPercent,
+        distanceInches = distanceInches,
+        statusText = statusText,
+        alarmText = alarmText,
+        lastReadingText = lastReadingText,
+        pumpPowerStatus = pumpPowerStatus,
+        pumpStatus = pumpStatus,
+        pumpLastRun = pumpLastRun,
+        pumpRunDuration = pumpRunDuration,
+        recentReadings = recentReadings
+    )
+
+    val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+        data = Uri.parse("mailto:")
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, body)
+    }
+
+    context.startActivity(Intent.createChooser(emailIntent, "Email Daily Report"))
+}
+
+fun buildDailyReport(
+    reportDate: String,
+    reportGeneratedAt: String,
+    tankPercent: Int,
+    distanceInches: Int,
+    statusText: String,
+    alarmText: String,
+    lastReadingText: String,
+    pumpPowerStatus: String,
+    pumpStatus: String,
+    pumpLastRun: String,
+    pumpRunDuration: String,
+    recentReadings: List<RecentReading>
+): String {
+    val readingsText = recentReadings.joinToString(separator = "\n") { reading ->
+        "- ${reading.time}: ${reading.level}, ${reading.status}"
+    }
+
+    return """
+        Septic Monitor Daily Report
+        Date: $reportDate
+        Generated: $reportGeneratedAt
+
+        System Status
+        - Status: $statusText
+        - Alarm: $alarmText
+        - Last reading: $lastReadingText
+
+        Tank Level
+        - Tank level: $tankPercent% full
+        - Sensor distance to liquid: $distanceInches inches
+
+        Pump Power Monitor
+        - Power: $pumpPowerStatus
+        - Pump: $pumpStatus
+        - Last run: $pumpLastRun
+        - Run duration: $pumpRunDuration
+
+        Today's Recent Readings
+        $readingsText
+    """.trimIndent()
 }
