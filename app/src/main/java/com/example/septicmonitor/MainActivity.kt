@@ -69,7 +69,7 @@ fun SepticMonitorApp() {
     var showCustomSplash by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        delay(1200)
+        delay(12000)
         showCustomSplash = false
     }
 
