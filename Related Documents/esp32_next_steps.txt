@@ -1,0 +1,36 @@
+Septic Monitor: ESP32 Coding Roadmap
+====================================
+
+Current Status:
+- ESP32 connects to Wi-Fi and Firebase.
+- Sends mock data (0-100% loop) every 5 seconds.
+- Android app reflects this data in real-time.
+
+Next Coding Steps (Before Sensor Arrival):
+------------------------------------------
+
+1. Real-Time Heartbeat (Connection Monitoring)
+   - Task: Update a "/status/last_seen" timestamp every 60 seconds.
+   - Purpose: Allows the Android app to show if the device is "Online" or "Offline".
+
+2. Sensor Logic Placeholder (HC-SR04 Preparation)
+   - Task: Define variables for `TANK_DEPTH_INCHES` and `SENSOR_OFFSET`.
+   - Task: Create a function `calculatePercentage(float distance)` that handles the math, so you only have to plug in the real distance value later.
+
+3. Error Handling & Reconnection
+   - Task: Add logic to handle Wi-Fi drops. If Wi-Fi is lost, the ESP32 should attempt to reconnect without needing a manual reset.
+   - Task: Monitor Firebase return codes (e.g., if a push fails).
+
+4. Over-the-Air (OTA) Updates
+   - Task: Integrate the `ArduinoOTA` library.
+   - Purpose: Allows you to update the ESP32 code wirelessly once it is installed in the septic tank housing.
+
+5. Power Management (Deep Sleep)
+   - Task: Research ESP32 Deep Sleep.
+   - Purpose: If you ever move to battery power, the ESP32 could wake up every 15 minutes, send one reading, and go back to sleep to save energy.
+
+6. Status LED feedback
+   - Task: Use the built-in RGB LED on the Nano ESP32 to show status:
+     - Blue: Connecting to Wi-Fi
+     - Green: Connected to Firebase
+     - Red: Error/Offline
