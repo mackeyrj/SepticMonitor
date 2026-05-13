@@ -1,0 +1,17 @@
+Septic Monitor - ESP32 Setup Notes
+====================================
+
+Board: Arduino Nano ESP32 (ESP32-S3)
+Core Version: 2.0.18 (Arduino 3)
+Pin Numbering: By GPIO number
+
+Firebase:
+- Host: septicmonitor-61662-default-rtdb.firebaseio.com
+- Node: /status/
+
+Planned Hardware:
+- Sensor: HC-SR04 Ultrasonic
+- Target Tank Depth: [TBD] inches
+
+Git Configuration:
+- secrets.h is excluded via .gitignore to protect Wi-Fi/Firebase credentials.
