@@ -1,65 +1,116 @@
-#include <Arduino.h> // Force Arduino core first
+#include <Arduino.h>
 #include <WiFi.h>
-#include <FirebaseESP32.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <FirebaseESP32.h> // Matching your installed library
+
 #include "secrets.h"
 
-// SYNC TEST: If you see this in your Arduino IDE, the sync is working!
-// You can now hit "Upload" in Arduino and "Commit" in Android Studio.
+/*
+  FINAL INTEGRATED FIRMWARE (FirebaseESP32 version)
+  - Sensor: A02YYUW (D0/D1)
+  - Pump Monitor: Shelly Plus (192.168.86.43)
+*/
+
+// Configuration
+const char* shellyIP = "192.168.86.43";
+const float TANK_EMPTY_INCHES = 55.0;
+const float TANK_FULL_INCHES = 10.0;
 
 // Firebase Objects
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 
-// Simulation variables
-int mockPercent = 0;
-unsigned long lastUpdate = 0;
-const long interval = 5000; // Update every 5 seconds
-
 void setup() {
   Serial.begin(115200);
 
-  // 1. Connect to Wi-Fi
+  // Initialize Sensor Serial
+  Serial1.begin(9600, SERIAL_8N1, D0, D1);
+
+  // Connect to Wi-Fi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nConnected with IP: " + WiFi.localIP().toString());
+  Serial.println("\nWiFi Connected!");
 
-  // 2. Configure Firebase
+  // Configure Firebase
   config.host = FIREBASE_HOST;
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
-
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
-  
-  Serial.println("Firebase Connection Initialized");
+}
+
+// Function to get distance from A02YYUW
+int getDistanceMM() {
+  while (Serial1.available()) Serial1.read();
+  delay(20);
+  Serial1.write(0x55);
+  Serial1.flush();
+
+  unsigned long start = millis();
+  while (millis() - start < 300) {
+    if (Serial1.available() >= 4) {
+      if (Serial1.read() == 0xFF) {
+        uint8_t h = Serial1.read();
+        uint8_t l = Serial1.read();
+        uint8_t sum = Serial1.read();
+        if (((0xFF + h + l) & 0xFF) == sum) {
+          return (h << 8) | l;
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+// Function to check Shelly Power
+float getShellyPower() {
+  HTTPClient http;
+  String url = "http://" + String(shellyIP) + "/rpc/Switch.GetStatus?id=0";
+  http.begin(url);
+  int httpCode = http.GET();
+  float watts = 0;
+  if (httpCode == 200) {
+    String payload = http.getString();
+    StaticJsonDocument<512> doc;
+    deserializeJson(doc, payload);
+    watts = doc["apower"];
+  }
+  http.end();
+  return watts;
 }
 
 void loop() {
-  // Only update every 'interval' milliseconds
-  if (millis() - lastUpdate > interval) {
-    lastUpdate = millis();
+  // 1. Get Sensor Data
+  int distMM = getDistanceMM();
+  int currentPercent = -1;
+  int distInches = 0;
 
-    // 3. Simulated Sensor Logic (while waiting for hardware)
-    mockPercent += 2;
-    if (mockPercent > 100) mockPercent = 0;
-
-    int mockDistance = 60 - (mockPercent * 0.4); // Simulate distance decreasing
-
-    // 4. Send Data to Firebase
-    // These paths match exactly what your SepticViewModel is looking for!
-    if (Firebase.ready()) {
-      Firebase.setInt(fbdo, "/status/tank_percent", mockPercent);
-      Firebase.setInt(fbdo, "/status/distance_inches", mockDistance);
-      Firebase.setString(fbdo, "/status/pump_status", (mockPercent > 80) ? "Pumping..." : "Idle");
-      Firebase.setString(fbdo, "/status/pump_power", "Available");
-      
-      Serial.printf("Pushed to Cloud: %d%% full\n", mockPercent);
-    } else {
-      Serial.println("Firebase Error: " + fbdo.errorReason());
-    }
+  if (distMM > 0) {
+    float inches = distMM / 25.4;
+    distInches = (int)inches;
+    currentPercent = map(inches * 10, TANK_EMPTY_INCHES * 10, TANK_FULL_INCHES * 10, 0, 100);
+    currentPercent = constrain(currentPercent, 0, 100);
   }
+
+  // 2. Get Pump Status from Shelly
+  float watts = getShellyPower();
+  String pumpStatus = (watts > 5.0) ? "Pumping..." : "Idle";
+  String pumpPower = (watts > 0.1) ? "Available" : "Offline";
+
+  // 3. Update Firebase
+  if (Firebase.ready() && currentPercent != -1) {
+    Firebase.setInt(fbdo, "/status/tank_percent", currentPercent);
+    Firebase.setInt(fbdo, "/status/distance_inches", distInches);
+    Firebase.setString(fbdo, "/status/pump_status", pumpStatus);
+    Firebase.setString(fbdo, "/status/pump_power", pumpPower);
+
+    Serial.printf("Tank: %d%% | Pump: %s (%.1fW)\n", currentPercent, pumpStatus.c_str(), watts);
+  }
+
+  delay(5000);
 }

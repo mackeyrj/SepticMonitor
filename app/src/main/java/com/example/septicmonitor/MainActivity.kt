@@ -7,6 +7,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.os.Build
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.example.septicmonitor.ui.theme.SepticMonitorTheme
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -54,6 +59,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -67,6 +77,8 @@ import kotlinx.coroutines.flow.update
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
 
 data class SepticState(
     val distanceInches: Int = 0,
@@ -180,11 +192,57 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        checkNotificationPermission()
+        scheduleDailyReport()
+
         setContent {
+            val viewModel: SepticViewModel = viewModel()
+
             SepticMonitorTheme {
-                SepticMonitorApp()
+                SepticMonitorApp(viewModel)
             }
         }
+    }
+
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            scheduleDailyReport()
+        }
+    }
+
+    private fun scheduleDailyReport() {
+        val currentDate = Calendar.getInstance()
+        val dueDate = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 12)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+        }
+
+        if (dueDate.before(currentDate)) {
+            dueDate.add(Calendar.HOUR_OF_DAY, 24)
+        }
+
+        val timeDiff = dueDate.timeInMillis - currentDate.timeInMillis
+
+        val dailyWorkRequest = PeriodicWorkRequestBuilder<DailyReportWorker>(24, TimeUnit.HOURS)
+            .setInitialDelay(timeDiff, TimeUnit.MILLISECONDS)
+            .build()
+
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            "DailyReportWork",
+            ExistingPeriodicWorkPolicy.REPLACE,
+            dailyWorkRequest
+        )
     }
 }
 
@@ -196,12 +254,63 @@ data class RecentReading(
 
 @Composable
 fun SepticMonitorApp(viewModel: SepticViewModel = viewModel()) {
-    var showCustomSplash by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    val intent = (context as? MainActivity)?.intent
+    val isFromNotification = intent?.getBooleanExtra("OPEN_REPORT", false) == true
+    
+    var showCustomSplash by remember { mutableStateOf(!isFromNotification) }
     val uiState by viewModel.uiState.collectAsState()
 
+    // Handle the notification report logic
+    LaunchedEffect(isFromNotification) {
+        if (isFromNotification) {
+            println("SepticMonitor: Notification detected. Skipping splash and waiting for cloud data...")
+            
+            // Wait up to 10 seconds for real cloud data to arrive
+            val finalState = withTimeoutOrNull(10000) {
+                viewModel.uiState.first { it.lastReadingText == "Live from Cloud" }
+            }
+
+            if (finalState != null) {
+                emailDailyReport(
+                    context = context,
+                    tankPercent = finalState.tankPercent,
+                    distanceInches = finalState.distanceInches,
+                    statusText = finalState.statusText,
+                    alarmText = finalState.alarmText,
+                    lastReadingText = finalState.lastReadingText,
+                    pumpPowerStatus = finalState.pumpPowerStatus,
+                    pumpStatus = finalState.pumpStatus,
+                    pumpLastRun = finalState.pumpLastRun,
+                    pumpRunDuration = finalState.pumpRunDuration,
+                    recentReadings = finalState.recentReadings
+                )
+            } else {
+                // If cloud is slow, send what we have but mark it as pending
+                emailDailyReport(
+                    context = context,
+                    tankPercent = uiState.tankPercent,
+                    distanceInches = uiState.distanceInches,
+                    statusText = uiState.statusText,
+                    alarmText = uiState.alarmText,
+                    lastReadingText = uiState.lastReadingText + " (Connecting...)",
+                    pumpPowerStatus = uiState.pumpPowerStatus,
+                    pumpStatus = uiState.pumpStatus,
+                    pumpLastRun = uiState.pumpLastRun,
+                    pumpRunDuration = uiState.pumpRunDuration,
+                    recentReadings = uiState.recentReadings
+                )
+            }
+            // Consume the intent so it doesn't fire again
+            intent.removeExtra("OPEN_REPORT")
+        }
+    }
+
     LaunchedEffect(Unit) {
-        delay(12000)
-        showCustomSplash = false
+        if (!isFromNotification) {
+            delay(12000)
+            showCustomSplash = false
+        }
     }
 
     if (showCustomSplash) {
@@ -296,11 +405,23 @@ fun SepticDashboard(
             color = Color(0xFFB8C7D9)
         )
 
+        val statusColor = when (state.statusText) {
+            "CRITICAL" -> Color(0xFFE74C3C) // Red
+            "High" -> Color(0xFFF1C40F)     // Yellow
+            else -> Color(0xFF2ECC71)       // Green
+        }
+
+        val statusDetail = when (state.statusText) {
+            "CRITICAL" -> "Immediate action required!"
+            "High" -> "Tank is filling up. Monitor closely."
+            else -> "Tank level is within the safe range"
+        }
+
         StatusCard(
             title = "System Status",
             mainValue = state.statusText,
-            detail = "Tank level is within the safe range",
-            color = Color(0xFF2ECC71)
+            detail = statusDetail,
+            color = statusColor
         )
 
         TankLevelCard(
@@ -721,10 +842,16 @@ fun emailDailyReport(
         recentReadings = recentReadings
     )
 
-    val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+    // Using a more robust Intent selector to ensure text is passed correctly to Gmail
+    val selectorIntent = Intent(Intent.ACTION_SENDTO).apply {
         data = Uri.parse("mailto:")
+    }
+    
+    val emailIntent = Intent(Intent.ACTION_SEND).apply {
+        putExtra(Intent.EXTRA_EMAIL, arrayOf("mackeyrj@gmail.com"))
         putExtra(Intent.EXTRA_SUBJECT, subject)
         putExtra(Intent.EXTRA_TEXT, body)
+        selector = selectorIntent
     }
 
     context.startActivity(Intent.createChooser(emailIntent, "Email Daily Report"))
