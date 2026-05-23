@@ -3,7 +3,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <FirebaseESP32.h>
-#include "time.h" // For NTP time
+#include "time.h"
 #include "secrets.h"
 
 // Configuration
@@ -19,22 +19,31 @@ FirebaseConfig config;
 
 // Global State
 bool wasPumping = false;
-int pumpRunCount = 0;
+unsigned long lastDistanceUpdate = 0;
+int heartbeatCount = 0;
 
 void setup() {
   Serial.begin(115200);
   Serial1.begin(9600, SERIAL_8N1, D0, D1);
 
+  // Initial Wi-Fi Setup
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
-  Serial.println("\nWiFi Connected!");
+  Serial.print("Connecting to Wi-Fi");
+  int retry = 0;
+  while (WiFi.status() != WL_CONNECTED && retry < 20) {
+    delay(500);
+    Serial.print(".");
+    retry++;
+  }
+  Serial.println("\nWiFi Setup Complete.");
 
-  // Initialize Time (NTP) - Set your offset (e.g., -5 for EST)
-  configTime(-18000, 3600, ntpServer); // -5 hours * 3600 seconds
+  configTime(-18000, 3600, ntpServer);
 
   config.host = FIREBASE_HOST;
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
 }
 
 int getDistanceMM() {
@@ -58,6 +67,7 @@ int getDistanceMM() {
 
 float getShellyPower() {
   HTTPClient http;
+  http.setTimeout(3000); // 3-second limit so it can't hang the loop
   http.begin("http://" + String(shellyIP) + "/rpc/Switch.GetStatus?id=0");
   int httpCode = http.GET();
   float watts = 0;
@@ -79,32 +89,50 @@ String getTimeString() {
 }
 
 void loop() {
-  int distMM = getDistanceMM();
-  float watts = getShellyPower();
-  bool isPumping = (watts > 10.0); // Adjust threshold for your pump
+  // 1. Wi-Fi Watchdog - Ensure we are ALWAYS connected
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Wi-Fi Lost! Reconnecting...");
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    delay(1000);
+    return; // Skip this loop and wait for Wi-Fi
+  }
 
-  // Pump Edge Detection (Detecting when it STARTS)
+  // 2. Check Pump (Fast check - every 5 seconds)
+  float watts = getShellyPower();
+  bool isPumping = (watts > 10.0);
+
   if (isPumping && !wasPumping) {
     wasPumping = true;
-    String currentTime = getTimeString();
-    Serial.println("PUMP STARTED! Logging to Firebase...");
-    // Push a new entry to the pump log folder
-    Firebase.pushString(fbdo, "/pump_log", currentTime);
+    Firebase.pushString(fbdo, "/pump_log", getTimeString());
+    Firebase.setString(fbdo, "/status/pump_status", "Pumping...");
   } else if (!isPumping && wasPumping) {
     wasPumping = false;
-    Serial.println("Pump Stopped.");
+    Firebase.setString(fbdo, "/status/pump_status", "Idle");
   }
 
-  // Standard updates
-  if (Firebase.ready()) {
-    if (distMM > 0) {
+  // 3. Check Distance (Slow check - every 60 seconds)
+  if (millis() - lastDistanceUpdate > 60000 || lastDistanceUpdate == 0) {
+    lastDistanceUpdate = millis();
+    int distMM = getDistanceMM();
+
+    if (distMM > 0 && Firebase.ready()) {
         float inches = distMM / 25.4;
         int currentPercent = constrain(map(inches * 10, TANK_EMPTY_INCHES * 10, TANK_FULL_INCHES * 10, 0, 100), 0, 100);
-        Firebase.setInt(fbdo, "/status/tank_percent", currentPercent);
-        Firebase.setInt(fbdo, "/status/distance_inches", (int)inches);
+
+        heartbeatCount++;
+
+        // BUNDLED UPDATE: Send all data at once
+        FirebaseJson json;
+        json.set("tank_percent", currentPercent);
+        json.set("distance_inches", (int)inches);
+        json.set("heartbeat", heartbeatCount);
+
+        Firebase.updateNode(fbdo, "/status", json);
+
+        Serial.printf("LOGGED: Dist: %d in | Pump: %s | Heartbeat: %d\n", (int)inches, isPumping ? "ON" : "OFF", heartbeatCount);
     }
-    Firebase.setString(fbdo, "/status/pump_status", isPumping ? "Pumping..." : "Idle");
   }
 
-  delay(5000);
+  delay(5000); // Check the pump every 5 seconds
 }

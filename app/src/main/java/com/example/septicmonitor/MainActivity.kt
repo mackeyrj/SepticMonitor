@@ -133,6 +133,9 @@ class SepticViewModel : ViewModel() {
                 }
 
                 _uiState.update { currentState ->
+                    // Only add to history if the percentage actually changed
+                    val isNewReading = currentState.tankPercent != tankPercent
+                    
                     currentState.copy(
                         distanceInches = distanceInches,
                         tankPercent = tankPercent,
@@ -141,13 +144,17 @@ class SepticViewModel : ViewModel() {
                         pumpPowerStatus = pumpPower,
                         lastReadingText = "Live from Cloud",
                         isWifiConnected = true,
-                        recentReadings = (listOf(
-                            RecentReading(
-                                SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()),
-                                "$tankPercent% full",
-                                newStatus
-                            )
-                        ) + currentState.recentReadings).take(5)
+                        recentReadings = if (isNewReading) {
+                            (listOf(
+                                RecentReading(
+                                    SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()),
+                                    "$tankPercent% full",
+                                    newStatus
+                                )
+                            ) + currentState.recentReadings).take(5)
+                        } else {
+                            currentState.recentReadings
+                        }
                     )
                 }
             }
