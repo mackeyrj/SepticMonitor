@@ -1,0 +1,43 @@
+# SepticMonitor IoT System - Project Summary
+
+## 1. Project Overview
+A dual-purpose IoT system designed to monitor a septic tank liquid level and track pump activity. The system uses an Arduino Nano ESP32 at the tank (solar-powered) and a Shelly Plus smart plug at the house to monitor pump power. Data is centralized in Firebase and displayed on a custom Android app.
+
+## 2. Hardware Architecture
+*   **Controller:** Arduino Nano ESP32 (S3).
+*   **Sensor:** Dioche A02YYUW Waterproof Ultrasonic Sensor (UART version).
+    *   **Wiring:** Red (VCC) -> VBUS (5V), Black (GND) -> GND, White (TX) -> D0 (RX), Yellow (RX) -> D1 (TX).
+    *   **Logic:** Triggered via 0x55 byte; 9600 baud.
+*   **Pump Monitor:** Shelly Plus (120V AC) at IP 192.168.86.43.
+*   **Power:** Solar Panel -> Charge Controller -> 12V Battery -> 12V-to-5V USB-C Step-down converter.
+
+## 3. Firmware (Arduino/ESP32) Status
+*   **Primary File:** `esp32/SepticMonitor/SepticMonitor.ino`
+*   **Library:** `FirebaseESP32.h` (Mobizt).
+*   **Features:**
+    *   **Smart Intervals:** Checks pump wattage every 5 seconds (to catch short runs); checks tank distance every 60 seconds (to save power/data).
+    *   **Watchdog:** Automatically reconnects to Wi-Fi if the signal is lost.
+    *   **Pump Logger:** Detects when wattage exceeds 10W, syncs time via NTP, and pushes a timestamp to `/pump_log` in Firebase.
+    *   **Bundled Updates:** Sends tank_percent, distance_inches, and heartbeat as a single JSON object to minimize Firebase triggers.
+*   **Credentials:** Stored in `esp32/SepticMonitor/secrets.h` (SSID, Password, Firebase Host, Firebase Auth).
+
+## 4. Android App Status
+*   **Language/UI:** Kotlin, Jetpack Compose, Material3.
+*   **Dashboard:** Displays Tank Level (Progress Bar), System Status (Dynamic colors: Green/Yellow/Red), Pump Power status, and History.
+*   **Daily Report:**
+    *   Uses WorkManager to trigger a notification at 12:00 PM daily.
+    *   Tapping the notification opens a pre-addressed email to mackeyrj@gmail.com.
+    *   **Wait Logic:** The app waits up to 10 seconds for "Live from Cloud" data before launching the email to ensure the report isn't blank.
+*   **Splash Screen:** 12-second custom splash (skipped if opened via notification).
+
+## 5. Cloud (Firebase) Structure
+*   **URL:** https://septicmonitor-61662-default-rtdb.firebaseio.com
+*   **`/status`**: Real-time node for level, heartbeat, and pump status.
+*   **`/pump_log`**: Historical list of every time the pump has started.
+
+## 6. Current Milestone
+The system has passed the "Living Room Test" (using a lamp as a pump). The Shelly is installed at the septic tank, and the ESP32 is currently undergoing a "Soak Test" (stability test) on computer power before final mounting in a watertight enclosure.
+
+## 7. Future Goals
+*   **Remote Calibration:** Adding a Settings screen in the app to adjust TANK_EMPTY and TANK_FULL values remotely via Firebase.
+*   **Advanced Reporting:** Counting the number of pump runs per day/week inside the app dashboard.
