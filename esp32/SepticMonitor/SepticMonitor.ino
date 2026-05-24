@@ -15,8 +15,8 @@
 
 // Configuration
 const char* shellyIP = "192.168.86.43";
-const float TANK_EMPTY_INCHES = 55.0;
-const float TANK_FULL_INCHES = 10.0;
+float tankEmptyInches = 55.0; // Default
+float tankFullInches = 10.0;  // Default
 const char* ntpServer = "pool.ntp.org";
 
 // Firebase Objects
@@ -51,6 +51,17 @@ void setup() {
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
+
+  // Fetch initial settings
+  if (Firebase.ready()) {
+    if (Firebase.getFloat(fbdo, "/settings/tank_empty")) {
+      tankEmptyInches = fbdo.floatData();
+    }
+    if (Firebase.getFloat(fbdo, "/settings/tank_full")) {
+      tankFullInches = fbdo.floatData();
+    }
+    Serial.printf("Settings Loaded: Empty: %.1f, Full: %.1f\n", tankEmptyInches, tankFullInches);
+  }
 }
 
 int getDistanceMM() {
@@ -125,7 +136,16 @@ void loop() {
 
     if (distMM > 0 && Firebase.ready()) {
         float inches = distMM / 25.4;
-        int currentPercent = constrain(map(inches * 10, TANK_EMPTY_INCHES * 10, TANK_FULL_INCHES * 10, 0, 100), 0, 100);
+
+        // Periodically refresh settings (every 10 minutes)
+        static unsigned long lastSettingsRefresh = 0;
+        if (millis() - lastSettingsRefresh > 600000) {
+            lastSettingsRefresh = millis();
+            if (Firebase.getFloat(fbdo, "/settings/tank_empty")) tankEmptyInches = fbdo.floatData();
+            if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
+        }
+
+        int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
 
         heartbeatCount++;
 

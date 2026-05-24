@@ -36,8 +36,8 @@ A dual-purpose IoT system designed to monitor a septic tank liquid level and tra
 *   **`/pump_log`**: Historical list of every time the pump has started.
 
 ## 6. Current Milestone
-The system has passed the "Living Room Test" (using a lamp as a pump). The Shelly is installed at the septic tank, and the ESP32 is currently undergoing a "Soak Test" (stability test) on computer power before final mounting in a watertight enclosure.
+The system has passed the "Living Room Test" and is now implementing Remote Calibration. The Android app includes a Settings screen to adjust tank dimensions, and the ESP32 firmware has been updated to sync these values from Firebase.
 
 ## 7. Future Goals
-*   **Remote Calibration:** Adding a Settings screen in the app to adjust TANK_EMPTY and TANK_FULL values remotely via Firebase.
 *   **Advanced Reporting:** Counting the number of pump runs per day/week inside the app dashboard.
+*   **Stability improvements:** Implementing Firebase Stream on ESP32 for immediate settings updates instead of polling.

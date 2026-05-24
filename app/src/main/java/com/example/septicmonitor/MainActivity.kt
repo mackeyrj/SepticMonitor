@@ -34,6 +34,16 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -91,14 +101,18 @@ data class SepticState(
     val pumpLastRun: String = "N/A",
     val pumpRunDuration: String = "N/A",
     val isWifiConnected: Boolean = false,
-    val recentReadings: List<RecentReading> = emptyList()
+    val recentReadings: List<RecentReading> = emptyList(),
+    val tankEmptyInches: Float = 55f,
+    val tankFullInches: Float = 10f
 )
 
 class SepticViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(SepticState())
     val uiState: StateFlow<SepticState> = _uiState.asStateFlow()
 
-    private val database = FirebaseDatabase.getInstance("https://septicmonitor-61662-default-rtdb.firebaseio.com").getReference("status")
+    private val database = FirebaseDatabase.getInstance("https://septicmonitor-61662-default-rtdb.firebaseio.com")
+    private val statusRef = database.getReference("status")
+    private val settingsRef = database.getReference("settings")
 
     init {
         // Initial mock data
@@ -108,10 +122,11 @@ class SepticViewModel : ViewModel() {
 
         // Start listening to Firebase for real-time updates
         setupFirebaseListener()
+        setupSettingsListener()
     }
 
     private fun setupFirebaseListener() {
-        database.addValueEventListener(object : ValueEventListener {
+        statusRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 println("SepticMonitor: Data changed! Snapshot: ${snapshot.value}")
                 
@@ -163,6 +178,27 @@ class SepticViewModel : ViewModel() {
                 println("SepticMonitor: Firebase Error: ${error.message}")
             }
         })
+    }
+
+    private fun setupSettingsListener() {
+        settingsRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val empty = snapshot.child("tank_empty").getValue(Float::class.java) ?: 55f
+                val full = snapshot.child("tank_full").getValue(Float::class.java) ?: 10f
+                
+                _uiState.update { it.copy(tankEmptyInches = empty, tankFullInches = full) }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    fun updateSettings(empty: Float, full: Float) {
+        val settings = mapOf(
+            "tank_empty" to empty,
+            "tank_full" to full
+        )
+        settingsRef.setValue(settings)
     }
 
     fun refreshData() {
@@ -266,6 +302,7 @@ fun SepticMonitorApp(viewModel: SepticViewModel = viewModel()) {
     val isFromNotification = intent?.getBooleanExtra("OPEN_REPORT", false) == true
     
     var showCustomSplash by remember { mutableStateOf(!isFromNotification) }
+    var currentScreen by remember { mutableStateOf("dashboard") }
     val uiState by viewModel.uiState.collectAsState()
 
     // Handle the notification report logic
@@ -329,7 +366,21 @@ fun SepticMonitorApp(viewModel: SepticViewModel = viewModel()) {
             modifier = Modifier.fillMaxSize(),
             color = Color(0xFF101820)
         ) {
-            SepticDashboard(uiState, onRefresh = { viewModel.refreshData() })
+            when (currentScreen) {
+                "dashboard" -> SepticDashboard(
+                    state = uiState,
+                    onRefresh = { viewModel.refreshData() },
+                    onOpenSettings = { currentScreen = "settings" }
+                )
+                "settings" -> SettingsScreen(
+                    state = uiState,
+                    onBack = { currentScreen = "dashboard" },
+                    onSave = { empty, full ->
+                        viewModel.updateSettings(empty, full)
+                        currentScreen = "dashboard"
+                    }
+                )
+            }
         }
     }
 }
@@ -395,7 +446,8 @@ fun CustomSplashScreen(
 @Composable
 fun SepticDashboard(
     state: SepticState,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -405,12 +457,27 @@ fun SepticDashboard(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = if (state.isWifiConnected) "Wi-Fi connected • Last reading: ${state.lastReadingText}" 
-                   else "Offline • Last reading: ${state.lastReadingText}",
-            fontSize = 15.sp,
-            color = Color(0xFFB8C7D9)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (state.isWifiConnected) "Wi-Fi connected • Last reading: ${state.lastReadingText}" 
+                       else "Offline • Last reading: ${state.lastReadingText}",
+                fontSize = 15.sp,
+                color = Color(0xFFB8C7D9),
+                modifier = Modifier.weight(1f)
+            )
+
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = Color.White
+                )
+            }
+        }
 
         val statusColor = when (state.statusText) {
             "CRITICAL" -> Color(0xFFE74C3C) // Red
@@ -905,4 +972,108 @@ fun buildDailyReport(
         Today's Recent Readings
         $readingsText
     """.trimIndent()
+}
+
+@Composable
+fun SettingsScreen(
+    state: SepticState,
+    onBack: () -> Unit,
+    onSave: (Float, Float) -> Unit
+) {
+    var tankEmpty by remember { mutableStateOf(state.tankEmptyInches.toString()) }
+    var tankFull by remember { mutableStateOf(state.tankFullInches.toString()) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text(
+                text = "Calibration Settings",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2A38)),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Tank Dimensions",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                OutlinedTextField(
+                    value = tankEmpty,
+                    onValueChange = { tankEmpty = it },
+                    label = { Text("Tank Empty (inches)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF4FC3F7),
+                        unfocusedBorderColor = Color(0xFF34495E),
+                        focusedLabelColor = Color(0xFF4FC3F7),
+                        unfocusedLabelColor = Color(0xFFB8C7D9)
+                    )
+                )
+
+                OutlinedTextField(
+                    value = tankFull,
+                    onValueChange = { tankFull = it },
+                    label = { Text("Tank Full (inches)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF4FC3F7),
+                        unfocusedBorderColor = Color(0xFF34495E),
+                        focusedLabelColor = Color(0xFF4FC3F7),
+                        unfocusedLabelColor = Color(0xFFB8C7D9)
+                    )
+                )
+
+                Text(
+                    text = "Empty: Distance from sensor to bottom of tank.\nFull: Distance from sensor to max fill line.",
+                    color = Color(0xFFB8C7D9),
+                    fontSize = 14.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = {
+                val empty = tankEmpty.toFloatOrNull() ?: state.tankEmptyInches
+                val full = tankFull.toFloatOrNull() ?: state.tankFullInches
+                onSave(empty, full)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("Save Calibration", fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp))
+        }
+    }
 }
