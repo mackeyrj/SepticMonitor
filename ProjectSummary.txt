@@ -15,7 +15,7 @@ A dual-purpose IoT system designed to monitor a septic tank liquid level and tra
 *   **Primary File:** `esp32/SepticMonitor/SepticMonitor.ino`
 *   **Library:** `FirebaseESP32.h` (Mobizt).
 *   **Features:**
-    *   **Smart Intervals:** Checks pump wattage every 5 seconds (to catch short runs); checks tank distance every 60 seconds (to save power/data).
+    *   **Smart Intervals:** Checks pump wattage every 5 seconds (to catch short runs); checks tank distance every 30 seconds (standard) or 15 seconds (test mode).
     *   **Watchdog:** Automatically reconnects to Wi-Fi if the signal is lost.
     *   **Pump Logger:** Detects when wattage exceeds 10W, syncs time via NTP, and pushes a timestamp to `/pump_log` in Firebase.
     *   **Bundled Updates:** Sends tank_percent, distance_inches, and heartbeat as a single JSON object to minimize Firebase triggers.

@@ -113,16 +113,15 @@ class SepticViewModel : ViewModel() {
     private val database = FirebaseDatabase.getInstance("https://septicmonitor-61662-default-rtdb.firebaseio.com")
     private val statusRef = database.getReference("status")
     private val settingsRef = database.getReference("settings")
+    private val logRef = database.getReference("pump_log")
 
     init {
-        // Initial mock data
-        refreshData()
-
         println("SepticMonitor: Initializing Firebase connection...")
 
         // Start listening to Firebase for real-time updates
         setupFirebaseListener()
         setupSettingsListener()
+        setupLogListener()
     }
 
     private fun setupFirebaseListener() {
@@ -193,6 +192,18 @@ class SepticViewModel : ViewModel() {
         })
     }
 
+    private fun setupLogListener() {
+        logRef.limitToLast(1).addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                // Get the last timestamp from the pump log
+                val lastRun = snapshot.children.firstOrNull()?.getValue(String::class.java) ?: "N/A"
+                _uiState.update { it.copy(pumpLastRun = lastRun) }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
     fun updateSettings(empty: Float, full: Float) {
         val settings = mapOf(
             "tank_empty" to empty,
@@ -202,30 +213,11 @@ class SepticViewModel : ViewModel() {
     }
 
     fun refreshData() {
-        _uiState.update { currentState ->
-            // Simulating a reading change
-            val newPercent = (currentState.tankPercent + 5).let { if (it > 100) 0 else it }
-            val newDistance = 60 - (newPercent * 0.4).toInt() // Simulate distance decreasing as tank fills
-            
-            val newStatus = when {
-                newPercent > 90 -> "CRITICAL"
-                newPercent > 75 -> "High"
-                else -> "Normal"
-            }
-
-            currentState.copy(
-                distanceInches = newDistance,
-                tankPercent = newPercent,
-                statusText = newStatus,
-                lastReadingText = "Just now (Simulated)",
-                pumpPowerStatus = if (newPercent > 50) "Active" else "Available",
-                pumpStatus = if (newPercent > 50) "Pumping..." else "Idle",
-                isWifiConnected = true,
-                recentReadings = listOf(
-                    RecentReading("Now", "$newPercent% full", newStatus)
-                ) + currentState.recentReadings.take(4)
-            )
-        }
+        // Quit Test Mode and request an immediate reading from the Arduino
+        statusRef.child("test_mode").setValue(false)
+        statusRef.child("refresh_request").setValue(true)
+        
+        _uiState.update { it.copy(lastReadingText = "Refreshing...") }
     }
 }
 
@@ -673,8 +665,8 @@ fun PumpPowerMonitorCard(
                 }
 
                 StatusPill(
-                    text = "ONLINE",
-                    color = Color(0xFF2ECC71)
+                    text = pumpPowerStatus.uppercase(),
+                    color = if (pumpPowerStatus == "Online") Color(0xFF2ECC71) else Color(0xFFE74C3C)
                 )
             }
 

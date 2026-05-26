@@ -27,6 +27,7 @@ FirebaseConfig config;
 // Global State
 bool wasPumping = false;
 unsigned long lastDistanceUpdate = 0;
+unsigned long distanceInterval = 15000; // Start in 15s Test Mode
 int heartbeatCount = 0;
 
 void setup() {
@@ -88,7 +89,7 @@ float getShellyPower() {
   http.setTimeout(3000); // 3-second limit so it can't hang the loop
   http.begin("http://" + String(shellyIP) + "/rpc/Switch.GetStatus?id=0");
   int httpCode = http.GET();
-  float watts = 0;
+  float watts = -1.0; // -1 indicates error/offline
   if (httpCode == 200) {
     StaticJsonDocument<512> doc;
     deserializeJson(doc, http.getString());
@@ -129,8 +130,23 @@ void loop() {
     Firebase.setString(fbdo, "/status/pump_status", "Idle");
   }
 
-  // 3. Check Distance (Slow check - every 60 seconds)
-  if (millis() - lastDistanceUpdate > 60000 || lastDistanceUpdate == 0) {
+  // 3. Check Distance
+  bool forceRefresh = false;
+  if (Firebase.ready()) {
+    // Check if the app requested an immediate refresh
+    if (Firebase.getBool(fbdo, "/status/refresh_request") && fbdo.boolData()) {
+      forceRefresh = true;
+      Firebase.setBool(fbdo, "/status/refresh_request", false); // Clear the flag
+    }
+
+    // Check if we should quit Test Mode
+    if (Firebase.getBool(fbdo, "/status/test_mode")) {
+      bool isTest = fbdo.boolData();
+      distanceInterval = isTest ? 15000 : 30000;
+    }
+  }
+
+  if (millis() - lastDistanceUpdate > distanceInterval || lastDistanceUpdate == 0 || forceRefresh) {
     lastDistanceUpdate = millis();
     int distMM = getDistanceMM();
 
@@ -145,7 +161,15 @@ void loop() {
             if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
         }
 
-        int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
+        // Handle Daily Heartbeat Reset
+        struct tm timeinfo;
+        if(getLocalTime(&timeinfo)) {
+            static int lastDay = -1;
+            if (timeinfo.tm_mday != lastDay) {
+                heartbeatCount = 0; // Reset at midnight
+                lastDay = timeinfo.tm_mday;
+            }
+        }
 
         heartbeatCount++;
 
@@ -163,7 +187,7 @@ void loop() {
 
   // 4. Always report pump power status
   if (Firebase.ready()) {
-      String pumpPower = (watts > 0.1) ? "Available" : "Offline";
+      String pumpPower = (watts >= 0.0) ? "Online" : "Offline";
       Firebase.setString(fbdo, "/status/pump_power", pumpPower);
   }
 
