@@ -185,6 +185,8 @@ void loop() {
 
         heartbeatCount++;
 
+        int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
+
         // BUNDLED UPDATE: Send all data at once
         FirebaseJson json;
         json.set("tank_percent", currentPercent);
