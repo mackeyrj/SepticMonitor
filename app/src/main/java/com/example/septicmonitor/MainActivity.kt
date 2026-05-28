@@ -134,6 +134,7 @@ class SepticViewModel : ViewModel() {
                 val distanceInches = snapshot.child("distance_inches").getValue(Int::class.java) ?: 0
                 val pumpStatus = snapshot.child("pump_status").getValue(String::class.java) ?: "Idle"
                 val pumpPower = snapshot.child("pump_power").getValue(String::class.java) ?: "Available"
+                val pumpDuration = snapshot.child("pump_run_duration").getValue(String::class.java) ?: "N/A"
 
                 if (tankPercent == null) {
                     println("SepticMonitor: tank_percent is null. Make sure it is inside 'status' folder.")
@@ -156,6 +157,7 @@ class SepticViewModel : ViewModel() {
                         statusText = newStatus,
                         pumpStatus = pumpStatus,
                         pumpPowerStatus = pumpPower,
+                        pumpRunDuration = pumpDuration,
                         lastReadingText = "Live from Cloud",
                         isWifiConnected = true,
                         recentReadings = if (isNewReading) {

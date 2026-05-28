@@ -26,6 +26,7 @@ FirebaseConfig config;
 
 // Global State
 bool wasPumping = false;
+unsigned long pumpStartTime = 0;
 unsigned long lastDistanceUpdate = 0;
 unsigned long distanceInterval = 15000; // Start in 15s Test Mode
 int heartbeatCount = 0;
@@ -123,10 +124,21 @@ void loop() {
 
     if (isPumping && !wasPumping) {
         wasPumping = true;
+        pumpStartTime = millis();
         Firebase.pushString(fbdo, "/pump_log", getTimeString());
         Firebase.setString(fbdo, "/status/pump_status", "Pumping...");
     } else if (!isPumping && wasPumping) {
         wasPumping = false;
+        unsigned long durationSeconds = (millis() - pumpStartTime) / 1000;
+
+        String durationText;
+        if (durationSeconds < 60) {
+            durationText = String(durationSeconds) + " sec";
+        } else {
+            durationText = String(durationSeconds / 60) + " min " + String(durationSeconds % 60) + " sec";
+        }
+
+        Firebase.setString(fbdo, "/status/pump_run_duration", durationText);
         Firebase.setString(fbdo, "/status/pump_status", "Idle");
     }
 
