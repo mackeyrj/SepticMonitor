@@ -6,38 +6,39 @@ A dual-purpose IoT system designed to monitor a septic tank liquid level and tra
 ## 2. Hardware Architecture
 *   **Controller:** Arduino Nano ESP32 (S3).
 *   **Sensor:** Dioche A02YYUW Waterproof Ultrasonic Sensor (UART version).
-    *   **Wiring:** Red (VCC) -> VBUS (5V), Black (GND) -> GND, White (TX) -> D0 (RX), Yellow (RX) -> D1 (TX).
     *   **Logic:** Triggered via 0x55 byte; 9600 baud.
 *   **Pump Monitor:** Shelly Plus (120V AC) at IP 192.168.86.43.
-*   **Power:** Solar Panel -> Charge Controller -> 12V Battery -> 12V-to-5V USB-C Step-down converter.
+*   **Power:** Solar Panel -> 12V Battery -> 12V-to-5V Step-down.
 
 ## 3. Firmware (Arduino/ESP32) Status
 *   **Primary File:** `esp32/SepticMonitor/SepticMonitor.ino`
-*   **Library:** `FirebaseESP32.h` (Mobizt).
 *   **Features:**
-    *   **Smart Intervals:** Checks pump wattage every 5 seconds (to catch short runs); checks tank distance every 30 seconds (standard) or 15 seconds (test mode).
-    *   **Watchdog:** Automatically reconnects to Wi-Fi if the signal is lost.
-    *   **Pump Logger:** Detects when wattage exceeds 10W, syncs time via NTP, and pushes a timestamp to `/pump_log` in Firebase.
-    *   **Bundled Updates:** Sends tank_percent, distance_inches, and heartbeat as a single JSON object to minimize Firebase triggers.
-*   **Credentials:** Stored in `esp32/SepticMonitor/secrets.h` (SSID, Password, Firebase Host, Firebase Auth).
+    *   **Smart Intervals:** Checks pump wattage every 5s; checks tank distance every 30s (Standard) or 15s (Test Mode).
+    *   **Remote Calibration:** Fetches `tank_empty` and `tank_full` from Firebase `/settings` node.
+    *   **Pump Analytics:** Calculates exact "Run Duration" (e.g. "2 min 15 sec") and logs unique start times to `/pump_log`.
+    *   **Daily Heartbeat:** Counter resets to 0 at midnight (NTP synced) to show "Readings Taken Today".
+    *   **Mode Control:** Automatically quits "Test Mode" and returns to 30s interval when requested by the app.
+    *   **Watchdog:** Auto-reconnects to Wi-Fi; reports Shelly "Offline" status if connection to the plug fails.
 
 ## 4. Android App Status
-*   **Language/UI:** Kotlin, Jetpack Compose, Material3.
-*   **Dashboard:** Displays Tank Level (Progress Bar), System Status (Dynamic colors: Green/Yellow/Red), Pump Power status, and History.
+*   **Dashboard:** Real-time progress bar for tank level, dynamic color-coded system status (Green/Yellow/Red).
+*   **Calibration UI:** Dedicated Settings screen to update tank dimensions in the cloud.
+*   **History & Logging:** Displays the last 5 unique level changes and the most recent pump run time/duration.
 *   **Daily Report:**
-    *   Uses WorkManager to trigger a notification at 12:00 PM daily.
-    *   Tapping the notification opens a pre-addressed email to mackeyrj@gmail.com.
-    *   **Wait Logic:** The app waits up to 10 seconds for "Live from Cloud" data before launching the email to ensure the report isn't blank.
-*   **Splash Screen:** 12-second custom splash (skipped if opened via notification).
+    *   Automated 12:00 PM notification via WorkManager.
+    *   Generates a full system report email to mackeyrj@gmail.com.
+    *   "Wait logic" ensures cloud data is live before launching the report.
+*   **Command Control:** "Refresh Reading" button triggers an immediate sensor check and disables high-frequency Test Mode.
 
 ## 5. Cloud (Firebase) Structure
 *   **URL:** https://septicmonitor-61662-default-rtdb.firebaseio.com
-*   **`/status`**: Real-time node for level, heartbeat, and pump status.
-*   **`/pump_log`**: Historical list of every time the pump has started.
+*   **`/status`**: Real-time updates for levels, pump state, heartbeat, and duration.
+*   **`/settings`**: Remote calibration values for the sensor.
+*   **`/pump_log`**: Historical archive of all pump activity using unique Push IDs.
 
 ## 6. Current Milestone
-The system has passed the "Living Room Test" and is now implementing Remote Calibration. The Android app includes a Settings screen to adjust tank dimensions, and the ESP32 firmware has been updated to sync these values from Firebase.
+The system is now fully feature-complete for field installation. It has passed stability testing for remote calibration, daily heartbeat resets, and pump duration tracking. The transition from "Test Mode" to "Standard Mode" via the app is fully operational.
 
 ## 7. Future Goals
-*   **Advanced Reporting:** Counting the number of pump runs per day/week inside the app dashboard.
-*   **Stability improvements:** Implementing Firebase Stream on ESP32 for immediate settings updates instead of polling.
+*   **Advanced Analytics:** Counting and displaying the total number of pump runs per week inside the dashboard.
+*   **Power Optimization:** Implementing "Deep Sleep" between readings if solar battery levels drop below a certain threshold.
