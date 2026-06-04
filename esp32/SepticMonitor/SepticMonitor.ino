@@ -33,7 +33,7 @@ int heartbeatCount = 0;
 
 void setup() {
   Serial.begin(115200);
-  Serial1.begin(9600, SERIAL_8N1, D0, D1);
+  Serial1.begin(9600, SERIAL_8N1, D0, D1); // Use Nano ESP32 pin labels (D0/D1)
 
   // Initial Wi-Fi Setup
   WiFi.mode(WIFI_STA);
@@ -51,10 +51,9 @@ void setup() {
 
   config.host = FIREBASE_HOST;
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
-
-  // Fetch initial settings
+  // Note: Firebase.ready() usually takes a few seconds to become true after begin().
+  // It's safer to handle initial fetch in the loop or after a short delay.
+  delay(1000);
   if (Firebase.ready()) {
     if (Firebase.getFloat(fbdo, "/settings/tank_empty")) {
       tankEmptyInches = fbdo.floatData();
@@ -120,26 +119,32 @@ void loop() {
 
   // 2. Check Pump (Fast check - every 5 seconds)
   float watts = getShellyPower();
-  bool isPumping = (watts > 10.0);
 
-  if (isPumping && !wasPumping) {
-    wasPumping = true;
-    pumpStartTime = millis();
-    Firebase.pushString(fbdo, "/pump_log", getTimeString());
-    Firebase.setString(fbdo, "/status/pump_status", "Pumping...");
-  } else if (!isPumping && wasPumping) {
-    wasPumping = false;
-    unsigned long durationSeconds = (millis() - pumpStartTime) / 1000;
+  // Robust Logic: Only change status if we have a valid reading (>= 0)
+  if (watts >= 0.0) {
+    bool isPumping = (watts > 10.0);
 
-    String durationText;
-    if (durationSeconds < 60) {
-        durationText = String(durationSeconds) + " sec";
-    } else {
-        durationText = String(durationSeconds / 60) + " min " + String(durationSeconds % 60) + " sec";
+    if (isPumping && !wasPumping) {
+      wasPumping = true;
+      pumpStartTime = millis();
+      String startTime = getTimeString();
+      Firebase.pushString(fbdo, "/pump_log", startTime);
+      Firebase.setString(fbdo, "/status/pump_status", "Pumping...");
+      Firebase.setString(fbdo, "/status/pump_run_duration", "Timing...");
+    } else if (!isPumping && wasPumping) {
+      wasPumping = false;
+      unsigned long durationSeconds = (millis() - pumpStartTime) / 1000;
+
+      String durationText;
+      if (durationSeconds < 60) {
+          durationText = String(durationSeconds) + " sec";
+      } else {
+          durationText = String(durationSeconds / 60) + " min " + String(durationSeconds % 60) + " sec";
+      }
+
+      Firebase.setString(fbdo, "/status/pump_run_duration", durationText);
+      Firebase.setString(fbdo, "/status/pump_status", "Idle");
     }
-
-    Firebase.setString(fbdo, "/status/pump_run_duration", durationText);
-    Firebase.setString(fbdo, "/status/pump_status", "Idle");
   }
 
   // 3. Check Distance

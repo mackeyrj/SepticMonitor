@@ -33,7 +33,7 @@ int heartbeatCount = 0;
 
 void setup() {
   Serial.begin(115200);
-  Serial1.begin(9600, SERIAL_8N1, D0, D1);
+  Serial1.begin(9600, SERIAL_8N1, D0, D1); // Use Nano ESP32 pin labels (D0/D1)
 
   // Initial Wi-Fi Setup
   WiFi.mode(WIFI_STA);
@@ -51,10 +51,9 @@ void setup() {
 
   config.host = FIREBASE_HOST;
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
-
-  // Fetch initial settings
+  // Note: Firebase.ready() usually takes a few seconds to become true after begin().
+  // It's safer to handle initial fetch in the loop or after a short delay.
+  delay(1000);
   if (Firebase.ready()) {
     if (Firebase.getFloat(fbdo, "/settings/tank_empty")) {
       tankEmptyInches = fbdo.floatData();
