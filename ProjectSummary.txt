@@ -1,17 +1,18 @@
 # SepticMonitor IoT System - Project Summary
 
 ## 1. Project Overview
-A dual-purpose IoT system designed to monitor a septic tank liquid level and track pump activity. The system uses an Arduino Nano ESP32 at the tank (solar-powered) and a Shelly Plus smart plug at the house to monitor pump power. Data is centralized in Firebase and displayed on a custom Android app.
+A dual-purpose IoT system designed to monitor a septic tank liquid level and track pump activity. The system has transitioned to a **LilyGo T-Display-S3 (ESP32-S3)** due to stability issues with the previous Nano ESP32 hardware.
 
 ## 2. Hardware Architecture
-*   **Controller:** Arduino Nano ESP32 (S3).
+*   **Controller:** LilyGo T-Display-S3 (ESP32-S3).
 *   **Sensor:** Dioche A02YYUW Waterproof Ultrasonic Sensor (UART version).
     *   **Logic:** Triggered via 0x55 byte; 9600 baud.
 *   **Pump Monitor:** Shelly Plus (120V AC) at IP 192.168.86.43.
 *   **Power:** Solar Panel -> 12V Battery -> 12V-to-5V Step-down.
 
-## 3. Firmware (Arduino/ESP32) Status
-*   **Primary File:** `esp32/SepticMonitor/SepticMonitor.ino`
+## 3. Firmware (LilyGo T-Display-S3) Status
+*   **Primary File:** *[User to provide updated sketch]*
+*   **Hardware Change:** Switched from Nano ESP32 to LilyGo S3 for improved connectivity and built-in LCD status monitoring.
 *   **Features:**
     *   **Smart Intervals:** Checks pump wattage every 5s; checks tank distance every 30s (Standard) or 15s (Test Mode).
     *   **Remote Calibration:** Fetches `tank_empty` and `tank_full` from Firebase `/settings` node.

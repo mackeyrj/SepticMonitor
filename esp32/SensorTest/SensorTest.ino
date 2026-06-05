@@ -15,8 +15,8 @@
 
 // Configuration
 const char* shellyIP = "192.168.86.43";
-float tankEmptyInches = 55.0; // Default
-float tankFullInches = 10.0;  // Default
+float tankEmptyInches = 55.0;  // Default
+float tankFullInches = 10.0;   // Default
 const char* ntpServer = "pool.ntp.org";
 
 // Firebase Objects
@@ -28,7 +28,7 @@ FirebaseConfig config;
 bool wasPumping = false;
 unsigned long pumpStartTime = 0;
 unsigned long lastDistanceUpdate = 0;
-unsigned long distanceInterval = 15000; // Start in 15s Test Mode
+unsigned long distanceInterval = 15000;  // Start in 15s Test Mode
 int heartbeatCount = 0;
 
 void setup() {
@@ -87,10 +87,10 @@ int getDistanceMM() {
 
 float getShellyPower() {
   HTTPClient http;
-  http.setTimeout(3000); // 3-second limit so it can't hang the loop
+  http.setTimeout(3000);  // 3-second limit so it can't hang the loop
   http.begin("http://" + String(shellyIP) + "/rpc/Switch.GetStatus?id=0");
   int httpCode = http.GET();
-  float watts = -1.0; // -1 indicates error/offline
+  float watts = -1.0;  // -1 indicates error/offline
   if (httpCode == 200) {
     StaticJsonDocument<512> doc;
     deserializeJson(doc, http.getString());
@@ -102,7 +102,7 @@ float getShellyPower() {
 
 String getTimeString() {
   struct tm timeinfo;
-  if(!getLocalTime(&timeinfo)) return "UnknownTime";
+  if (!getLocalTime(&timeinfo)) return "UnknownTime";
   char timeStr[20];
   strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
   return String(timeStr);
@@ -115,7 +115,7 @@ void loop() {
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     delay(1000);
-    return; // Skip this loop and wait for Wi-Fi
+    return;  // Skip this loop and wait for Wi-Fi
   }
 
   // 2. Check Pump (Fast check - every 5 seconds)
@@ -133,9 +133,9 @@ void loop() {
 
     String durationText;
     if (durationSeconds < 60) {
-        durationText = String(durationSeconds) + " sec";
+      durationText = String(durationSeconds) + " sec";
     } else {
-        durationText = String(durationSeconds / 60) + " min " + String(durationSeconds % 60) + " sec";
+      durationText = String(durationSeconds / 60) + " min " + String(durationSeconds % 60) + " sec";
     }
 
     Firebase.setString(fbdo, "/status/pump_run_duration", durationText);
@@ -148,7 +148,7 @@ void loop() {
     // Check if the app requested an immediate refresh
     if (Firebase.getBool(fbdo, "/status/refresh_request") && fbdo.boolData()) {
       forceRefresh = true;
-      Firebase.setBool(fbdo, "/status/refresh_request", false); // Clear the flag
+      Firebase.setBool(fbdo, "/status/refresh_request", false);  // Clear the flag
     }
 
     // Check if we should quit Test Mode
@@ -163,47 +163,47 @@ void loop() {
     int distMM = getDistanceMM();
 
     if (distMM > 0 && Firebase.ready()) {
-        float inches = distMM / 25.4;
+      float inches = distMM / 25.4;
 
-        // Periodically refresh settings (every 10 minutes)
-        static unsigned long lastSettingsRefresh = 0;
-        if (millis() - lastSettingsRefresh > 600000) {
-            lastSettingsRefresh = millis();
-            if (Firebase.getFloat(fbdo, "/settings/tank_empty")) tankEmptyInches = fbdo.floatData();
-            if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
+      // Periodically refresh settings (every 10 minutes)
+      static unsigned long lastSettingsRefresh = 0;
+      if (millis() - lastSettingsRefresh > 600000) {
+        lastSettingsRefresh = millis();
+        if (Firebase.getFloat(fbdo, "/settings/tank_empty")) tankEmptyInches = fbdo.floatData();
+        if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
+      }
+
+      // Handle Daily Heartbeat Reset
+      struct tm timeinfo;
+      if (getLocalTime(&timeinfo)) {
+        static int lastDay = -1;
+        if (timeinfo.tm_mday != lastDay) {
+          heartbeatCount = 0;  // Reset at midnight
+          lastDay = timeinfo.tm_mday;
         }
+      }
 
-        // Handle Daily Heartbeat Reset
-        struct tm timeinfo;
-        if(getLocalTime(&timeinfo)) {
-            static int lastDay = -1;
-            if (timeinfo.tm_mday != lastDay) {
-                heartbeatCount = 0; // Reset at midnight
-                lastDay = timeinfo.tm_mday;
-            }
-        }
+      heartbeatCount++;
 
-        heartbeatCount++;
+      int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
 
-        int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
+      // BUNDLED UPDATE: Send all data at once
+      FirebaseJson json;
+      json.set("tank_percent", currentPercent);
+      json.set("distance_inches", (int)inches);
+      json.set("heartbeat", heartbeatCount);
 
-        // BUNDLED UPDATE: Send all data at once
-        FirebaseJson json;
-        json.set("tank_percent", currentPercent);
-        json.set("distance_inches", (int)inches);
-        json.set("heartbeat", heartbeatCount);
+      Firebase.updateNode(fbdo, "/status", json);
 
-        Firebase.updateNode(fbdo, "/status", json);
-
-        Serial.printf("LOGGED: Dist: %d in | Pump: %s | Heartbeat: %d\n", (int)inches, isPumping ? "ON" : "OFF", heartbeatCount);
+      Serial.printf("LOGGED: Dist: %d in | Pump: %s | Heartbeat: %d\n", (int)inches, isPumping ? "ON" : "OFF", heartbeatCount);
     }
   }
 
   // 4. Always report pump power status
   if (Firebase.ready()) {
-      String pumpPower = (watts >= 0.0) ? "Online" : "Offline";
-      Firebase.setString(fbdo, "/status/pump_power", pumpPower);
+    String pumpPower = (watts >= 0.0) ? "Online" : "Offline";
+    Firebase.setString(fbdo, "/status/pump_power", pumpPower);
   }
 
-  delay(5000); // Check the pump every 5 seconds
+  delay(5000);  // Check the pump every 5 seconds
 }

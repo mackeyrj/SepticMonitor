@@ -68,6 +68,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -215,11 +217,20 @@ class SepticViewModel : ViewModel() {
     }
 
     fun refreshData() {
-        // Quit Test Mode and request an immediate reading from the Arduino
+        // Clear any old flags and request a fresh reading
         statusRef.child("test_mode").setValue(false)
         statusRef.child("refresh_request").setValue(true)
         
-        _uiState.update { it.copy(lastReadingText = "Refreshing...") }
+        // Update UI immediately to show we are waiting
+        _uiState.update { it.copy(lastReadingText = "Requesting live data...") }
+        
+        // Add a safety timeout: If no update in 12 seconds, reset the text
+        viewModelScope.launch {
+            delay(12000)
+            if (_uiState.value.lastReadingText == "Requesting live data...") {
+                _uiState.update { it.copy(lastReadingText = "Update Timeout (Check Hardware)") }
+            }
+        }
     }
 }
 
