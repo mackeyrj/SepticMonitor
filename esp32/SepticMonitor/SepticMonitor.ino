@@ -32,18 +32,8 @@ unsigned long distanceInterval = 15000; // Start in 15s Test Mode
 int heartbeatCount = 0;
 
 void setup() {
-  // Initialize RGB LED pins
-  pinMode(LED_RED, OUTPUT);
-  pinMode(LED_GREEN, OUTPUT);
-  pinMode(LED_BLUE, OUTPUT);
-
-  // Start with Blue (Connecting)
-  digitalWrite(LED_BLUE, LOW);  // Active-low: LOW is ON
-  digitalWrite(LED_RED, HIGH);
-  digitalWrite(LED_GREEN, HIGH);
-
   Serial.begin(115200);
-  Serial1.begin(9600, SERIAL_8N1, 0, 1);
+  Serial1.begin(9600, SERIAL_8N1, D0, D1);
 
   // Initial Wi-Fi Setup
   WiFi.mode(WIFI_STA);
@@ -78,25 +68,20 @@ void setup() {
 
 int getDistanceMM() {
   while (Serial1.available()) Serial1.read();
-  delay(100); // Give the sensor a moment to settle
+  delay(20);
   Serial1.write(0x55);
   Serial1.flush();
   unsigned long start = millis();
-  while (millis() - start < 600) { // Increased timeout to 600ms
+  while (millis() - start < 300) {
     if (Serial1.available() >= 4) {
       if (Serial1.read() == 0xFF) {
         uint8_t h = Serial1.read();
         uint8_t l = Serial1.read();
         uint8_t sum = Serial1.read();
-        if (((0xFF + h + l) & 0xFF) == sum) {
-          int mm = (h << 8) | l;
-          Serial.printf("Raw Sensor: %d mm\n", mm);
-          return mm;
-        }
+        if (((0xFF + h + l) & 0xFF) == sum) return (h << 8) | l;
       }
     }
   }
-  Serial.println("Sensor Timeout/Error - Check Wiring on Pins 0 & 1");
   return -1;
 }
 
@@ -126,21 +111,12 @@ String getTimeString() {
 void loop() {
   // 1. Wi-Fi Watchdog - Ensure we are ALWAYS connected
   if (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(LED_RED, LOW);   // Red ON (Error)
-    digitalWrite(LED_GREEN, HIGH);
-    digitalWrite(LED_BLUE, HIGH);
-
     Serial.println("Wi-Fi Lost! Reconnecting...");
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     delay(1000);
     return; // Skip this loop and wait for Wi-Fi
   }
-
-  // If connected, show Green
-  digitalWrite(LED_GREEN, LOW); // Green ON (Healthy)
-  digitalWrite(LED_RED, HIGH);
-  digitalWrite(LED_BLUE, HIGH);
 
   // 2. Check Pump (Fast check - every 5 seconds)
   float watts = getShellyPower();
@@ -179,9 +155,6 @@ void loop() {
     if (Firebase.getBool(fbdo, "/status/test_mode")) {
       bool isTest = fbdo.boolData();
       distanceInterval = isTest ? 15000 : 30000;
-    } else {
-      // If the path doesn't exist, default to 30s
-      distanceInterval = 30000;
     }
   }
 
@@ -211,12 +184,6 @@ void loop() {
         }
 
         heartbeatCount++;
-
-        if (tankEmptyInches <= tankFullInches) {
-            Serial.println("Calibration Error: Empty must be > Full");
-            tankEmptyInches = 55.0;
-            tankFullInches = 10.0;
-        }
 
         int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
 
