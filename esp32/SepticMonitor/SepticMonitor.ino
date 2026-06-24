@@ -3,49 +3,124 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <FirebaseESP32.h>
+#include <TFT_eSPI.h> // LilyGo T-Display-S3 Screen Library
 #include "time.h"
 #include "secrets.h"
 
 /*
-  SEPTIC MONITOR - FINAL INTEGRATED FIRMWARE
-  - Sensor: A02YYUW (D0/D1)
+  SEPTIC MONITOR - LILYGO T-DISPLAY-S3 EDITION
+  - Controller: ESP32-S3
+  - Display: Built-in 1.9" LCD
+  - Sensor: A02YYUW (Pins 17 TX / 18 RX)
   - Pump Monitor: Shelly Plus (192.168.86.43)
-  - Cloud: Firebase Realtime Database
 */
+
+// --- LILYGO S3 PIN MAPPING ---
+#define SENSOR_TX 17
+#define SENSOR_RX 18
 
 // Configuration
 const char* shellyIP = "192.168.86.43";
-float tankEmptyInches = 55.0; // Default
-float tankFullInches = 10.0;  // Default
+float tankEmptyInches = 55.0;
+float tankFullInches = 10.0;
 const char* ntpServer = "pool.ntp.org";
 
 // Firebase Objects
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
+TFT_eSPI tft = TFT_eSPI(); // Initialize the Screen
 
 // Global State
 bool wasPumping = false;
 unsigned long pumpStartTime = 0;
 unsigned long lastDistanceUpdate = 0;
-unsigned long distanceInterval = 15000; // Start in 15s Test Mode
+unsigned long distanceInterval = 15000;
 int heartbeatCount = 0;
+float currentWatts = 0.0;
+int lastPercent = 0;
+int lastInches = 0;
+
+void updateDisplay() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+  // 1. Header (Lowered to avoid bezel)
+  tft.setTextSize(2);
+  tft.setCursor(0, 5);
+  tft.println(" SEPTIC MONITOR S3");
+  tft.drawFastHLine(0, 25, 320, TFT_BLUE);
+
+  // 2. Tank Level Section
+  tft.setTextSize(3);
+  tft.setCursor(10, 40);
+  tft.printf("%d%% FULL", lastPercent);
+
+  // Draw the Progress Bar (Compact version)
+  tft.drawRect(10, 75, 180, 25, TFT_WHITE);
+  int barWidth = map(lastPercent, 0, 100, 0, 176);
+  uint16_t barColor = (lastPercent > 80) ? TFT_RED : (lastPercent > 60) ? TFT_YELLOW : TFT_GREEN;
+  if (barWidth > 0) {
+    tft.fillRect(12, 77, barWidth, 21, barColor);
+  }
+
+  // 3. Status Info (Shifted Up)
+  tft.setTextSize(2);
+  tft.setCursor(10, 110);
+  tft.printf("Dist: %d in", lastInches);
+
+  tft.setCursor(10, 135);
+  tft.print("Pump: ");
+  if (currentWatts > 10.0) {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.print("RUNNING");
+  } else {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.print("IDLE");
+  }
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+  // 4. Status Bar (Raised so it's visible)
+  tft.setTextSize(1);
+  tft.setCursor(5, 160);
+  tft.drawFastHLine(0, 158, 320, TFT_DARKGREY);
+  tft.printf("WiFi: %s | HB: %d", (WiFi.status() == WL_CONNECTED ? "OK" : "LOSS"), heartbeatCount);
+}
 
 void setup() {
+  // --- MANDATORY LILYGO S3 POWER ON ---
+  pinMode(15, OUTPUT);
+  digitalWrite(15, HIGH); // Turn on screen power
+  pinMode(38, OUTPUT);
+  digitalWrite(38, HIGH); // Turn on backlight
+
   Serial.begin(115200);
-  Serial1.begin(9600, SERIAL_8N1, D0, D1);
+  unsigned long startWait = millis();
+  while (!Serial && millis() - startWait < 5000);
+
+  // LilyGo Screen Initialization
+  tft.init();
+  tft.setRotation(1); // Landscape
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 10);
+  tft.println("HARDWARE: OK");
+  tft.println("CONNECTING WIFI...");
+
+  // Sensor Serial (S3 Hardware Serial 1)
+  Serial1.begin(9600, SERIAL_8N1, SENSOR_RX, SENSOR_TX);
 
   // Initial Wi-Fi Setup
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to Wi-Fi");
+
   int retry = 0;
   while (WiFi.status() != WL_CONNECTED && retry < 20) {
     delay(500);
-    Serial.print(".");
+    tft.print(".");
     retry++;
   }
-  Serial.println("\nWiFi Setup Complete.");
 
   configTime(-18000, 3600, ntpServer);
 
@@ -54,31 +129,33 @@ void setup() {
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
-  // Fetch initial settings
+  // Load Settings
   if (Firebase.ready()) {
-    if (Firebase.getFloat(fbdo, "/settings/tank_empty")) {
-      tankEmptyInches = fbdo.floatData();
-    }
-    if (Firebase.getFloat(fbdo, "/settings/tank_full")) {
-      tankFullInches = fbdo.floatData();
-    }
-    Serial.printf("Settings Loaded: Empty: %.1f, Full: %.1f\n", tankEmptyInches, tankFullInches);
+    if (Firebase.getFloat(fbdo, "/settings/tank_empty")) tankEmptyInches = fbdo.floatData();
+    if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
   }
+
+  updateDisplay();
 }
 
 int getDistanceMM() {
   while (Serial1.available()) Serial1.read();
-  delay(20);
+  delay(100);
   Serial1.write(0x55);
   Serial1.flush();
+
   unsigned long start = millis();
-  while (millis() - start < 300) {
+  while (millis() - start < 600) {
     if (Serial1.available() >= 4) {
       if (Serial1.read() == 0xFF) {
         uint8_t h = Serial1.read();
         uint8_t l = Serial1.read();
         uint8_t sum = Serial1.read();
-        if (((0xFF + h + l) & 0xFF) == sum) return (h << 8) | l;
+        if (((0xFF + h + l) & 0xFF) == sum) {
+           int mm = (h << 8) | l;
+           Serial.printf("Raw Sensor: %d mm\n", mm);
+           return mm;
+        }
       }
     }
   }
@@ -87,10 +164,10 @@ int getDistanceMM() {
 
 float getShellyPower() {
   HTTPClient http;
-  http.setTimeout(3000); // 3-second limit so it can't hang the loop
+  http.setTimeout(3000);
   http.begin("http://" + String(shellyIP) + "/rpc/Switch.GetStatus?id=0");
   int httpCode = http.GET();
-  float watts = -1.0; // -1 indicates error/offline
+  float watts = -1.0;
   if (httpCode == 200) {
     StaticJsonDocument<512> doc;
     deserializeJson(doc, http.getString());
@@ -109,18 +186,16 @@ String getTimeString() {
 }
 
 void loop() {
-  // 1. Wi-Fi Watchdog - Ensure we are ALWAYS connected
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Wi-Fi Lost! Reconnecting...");
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    delay(1000);
-    return; // Skip this loop and wait for Wi-Fi
+    delay(2000);
+    return;
   }
 
-  // 2. Check Pump (Fast check - every 5 seconds)
-  float watts = getShellyPower();
-  bool isPumping = (watts > 10.0);
+  // 1. Pump Check
+  currentWatts = getShellyPower();
+  bool isPumping = (currentWatts > 10.0);
 
   if (isPumping && !wasPumping) {
     wasPumping = true;
@@ -130,31 +205,20 @@ void loop() {
   } else if (!isPumping && wasPumping) {
     wasPumping = false;
     unsigned long durationSeconds = (millis() - pumpStartTime) / 1000;
-
-    String durationText;
-    if (durationSeconds < 60) {
-        durationText = String(durationSeconds) + " sec";
-    } else {
-        durationText = String(durationSeconds / 60) + " min " + String(durationSeconds % 60) + " sec";
-    }
-
+    String durationText = (durationSeconds < 60) ? String(durationSeconds) + " sec" : String(durationSeconds / 60) + " min";
     Firebase.setString(fbdo, "/status/pump_run_duration", durationText);
     Firebase.setString(fbdo, "/status/pump_status", "Idle");
   }
 
-  // 3. Check Distance
+  // 2. Distance Check
   bool forceRefresh = false;
   if (Firebase.ready()) {
-    // Check if the app requested an immediate refresh
     if (Firebase.getBool(fbdo, "/status/refresh_request") && fbdo.boolData()) {
       forceRefresh = true;
-      Firebase.setBool(fbdo, "/status/refresh_request", false); // Clear the flag
+      Firebase.setBool(fbdo, "/status/refresh_request", false);
     }
-
-    // Check if we should quit Test Mode
     if (Firebase.getBool(fbdo, "/status/test_mode")) {
-      bool isTest = fbdo.boolData();
-      distanceInterval = isTest ? 15000 : 30000;
+      distanceInterval = fbdo.boolData() ? 15000 : 30000;
     }
   }
 
@@ -163,47 +227,30 @@ void loop() {
     int distMM = getDistanceMM();
 
     if (distMM > 0 && Firebase.ready()) {
-        float inches = distMM / 25.4;
+        lastInches = distMM / 25.4;
+        lastPercent = constrain(map(lastInches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
 
-        // Periodically refresh settings (every 10 minutes)
-        static unsigned long lastSettingsRefresh = 0;
-        if (millis() - lastSettingsRefresh > 600000) {
-            lastSettingsRefresh = millis();
-            if (Firebase.getFloat(fbdo, "/settings/tank_empty")) tankEmptyInches = fbdo.floatData();
-            if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
-        }
-
-        // Handle Daily Heartbeat Reset
+        // Handle Daily Reset
         struct tm timeinfo;
         if(getLocalTime(&timeinfo)) {
             static int lastDay = -1;
-            if (timeinfo.tm_mday != lastDay) {
-                heartbeatCount = 0; // Reset at midnight
-                lastDay = timeinfo.tm_mday;
-            }
+            if (timeinfo.tm_mday != lastDay) { heartbeatCount = 0; lastDay = timeinfo.tm_mday; }
         }
-
         heartbeatCount++;
 
-        int currentPercent = constrain(map(inches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
-
-        // BUNDLED UPDATE: Send all data at once
         FirebaseJson json;
-        json.set("tank_percent", currentPercent);
-        json.set("distance_inches", (int)inches);
+        json.set("tank_percent", lastPercent);
+        json.set("distance_inches", lastInches);
         json.set("heartbeat", heartbeatCount);
-
         Firebase.updateNode(fbdo, "/status", json);
-
-        Serial.printf("LOGGED: Dist: %d in | Pump: %s | Heartbeat: %d\n", (int)inches, isPumping ? "ON" : "OFF", heartbeatCount);
     }
   }
 
-  // 4. Always report pump power status
+  // 3. Status Reporting
   if (Firebase.ready()) {
-      String pumpPower = (watts >= 0.0) ? "Online" : "Offline";
-      Firebase.setString(fbdo, "/status/pump_power", pumpPower);
+      Firebase.setString(fbdo, "/status/pump_power", (currentWatts >= 0.0) ? "Online" : "Offline");
   }
 
-  delay(5000); // Check the pump every 5 seconds
+  updateDisplay();
+  delay(5000);
 }
