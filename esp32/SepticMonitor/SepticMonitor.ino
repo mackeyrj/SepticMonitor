@@ -39,9 +39,24 @@ unsigned long distanceInterval = 15000;
 int heartbeatCount = 0;
 float currentWatts = 0.0;
 int lastPercent = 0;
-int lastInches = 0;
+float lastInches = 0;
+bool lastSwitchState = true;
+
+// Screen Sleep Logic
+bool screenIsOn = true;
+unsigned long lastScreenWake = 0;
+const unsigned long screenTimeout = 600000; // 10 minutes in milliseconds
+
+void setScreenPower(bool on) {
+    screenIsOn = on;
+    digitalWrite(15, on ? HIGH : LOW); // LCD Power
+    digitalWrite(38, on ? HIGH : LOW); // Backlight
+    if (on) lastScreenWake = millis();
+}
 
 void updateDisplay() {
+  if (!screenIsOn) return; // Don't waste cycles if screen is off
+
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
@@ -67,7 +82,7 @@ void updateDisplay() {
   // 3. Status Info (Shifted Up)
   tft.setTextSize(2);
   tft.setCursor(10, 110);
-  tft.printf("Dist: %d in", lastInches);
+  tft.printf("Dist: %.1f in", lastInches);
 
   tft.setCursor(10, 135);
   tft.print("Pump: ");
@@ -90,9 +105,12 @@ void updateDisplay() {
 void setup() {
   // --- MANDATORY LILYGO S3 POWER ON ---
   pinMode(15, OUTPUT);
-  digitalWrite(15, HIGH); // Turn on screen power
   pinMode(38, OUTPUT);
-  digitalWrite(38, HIGH); // Turn on backlight
+  setScreenPower(true);
+
+  // Setup Wake Buttons (Side buttons on LilyGo S3)
+  pinMode(0, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
 
   Serial.begin(115200);
   unsigned long startWait = millis();
@@ -153,7 +171,8 @@ int getDistanceMM() {
         uint8_t sum = Serial1.read();
         if (((0xFF + h + l) & 0xFF) == sum) {
            int mm = (h << 8) | l;
-           Serial.printf("Raw Sensor: %d mm\n", mm);
+           float inches = mm / 25.4;
+           Serial.printf("Sensor: %d mm (%.1f in)\n", mm, inches);
            return mm;
         }
       }
@@ -172,9 +191,23 @@ float getShellyPower() {
     StaticJsonDocument<512> doc;
     deserializeJson(doc, http.getString());
     watts = doc["apower"];
+    lastSwitchState = doc["output"]; // Capture the physical switch state
   }
   http.end();
   return watts;
+}
+
+void setShellyState(bool on) {
+  HTTPClient http;
+  http.setTimeout(3000);
+  String url = "http://" + String(shellyIP) + "/rpc/Switch.Set?id=0&on=" + (on ? "true" : "false");
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == 200) {
+    lastSwitchState = on;
+    Serial.printf("Remote: Shelly Switch turned %s\n", on ? "ON" : "OFF");
+  }
+  http.end();
 }
 
 String getTimeString() {
@@ -216,10 +249,23 @@ void loop() {
     if (Firebase.getBool(fbdo, "/status/refresh_request") && fbdo.boolData()) {
       forceRefresh = true;
       Firebase.setBool(fbdo, "/status/refresh_request", false);
+      setScreenPower(true); // Wake screen on remote refresh
     }
     if (Firebase.getBool(fbdo, "/status/test_mode")) {
       distanceInterval = fbdo.boolData() ? 15000 : 30000;
     }
+  }
+
+  // Handle Physical Wake Buttons
+  if (digitalRead(0) == LOW || digitalRead(14) == LOW) {
+      if (!screenIsOn) setScreenPower(true);
+      else lastScreenWake = millis(); // Extend timer
+  }
+
+  // Handle Screen Timeout
+  if (screenIsOn && (millis() - lastScreenWake > screenTimeout)) {
+      setScreenPower(false);
+      Serial.println("Power Save: Screen turned OFF");
   }
 
   if (millis() - lastDistanceUpdate > distanceInterval || lastDistanceUpdate == 0 || forceRefresh) {
@@ -228,7 +274,26 @@ void loop() {
 
     if (distMM > 0 && Firebase.ready()) {
         lastInches = distMM / 25.4;
-        lastPercent = constrain(map(lastInches * 10, tankEmptyInches * 10, tankFullInches * 10, 0, 100), 0, 100);
+
+        // Periodically refresh settings (every 30 seconds for faster calibration)
+        static unsigned long lastSettingsRefresh = 0;
+        if (millis() - lastSettingsRefresh > 30000 || lastSettingsRefresh == 0) {
+            lastSettingsRefresh = millis();
+            if (Firebase.getFloat(fbdo, "/settings/tank_empty")) tankEmptyInches = fbdo.floatData();
+            if (Firebase.getFloat(fbdo, "/settings/tank_full")) tankFullInches = fbdo.floatData();
+            Serial.printf("SYNC: Empty=%.1f\" Full=%.1f\"\n", tankEmptyInches, tankFullInches);
+        }
+
+        // Percentage Calculation (Explicit Fill Math)
+        if (abs(tankEmptyInches - tankFullInches) > 0.1) {
+            float totalSpan = tankEmptyInches - tankFullInches;
+            float amountFilled = tankEmptyInches - lastInches;
+            lastPercent = (int)((amountFilled / totalSpan) * 100.0);
+        }
+        lastPercent = constrain(lastPercent, 0, 100);
+
+        Serial.printf("CALC: %.1f\" is %d%% full (Range: %.1f\" to %.1f\")\n",
+                      lastInches, lastPercent, tankEmptyInches, tankFullInches);
 
         // Handle Daily Reset
         struct tm timeinfo;
@@ -246,9 +311,18 @@ void loop() {
     }
   }
 
-  // 3. Status Reporting
+  // 3. Status Reporting & Remote Control
   if (Firebase.ready()) {
       Firebase.setString(fbdo, "/status/pump_power", (currentWatts >= 0.0) ? "Online" : "Offline");
+      Firebase.setBool(fbdo, "/status/pump_switch_state", lastSwitchState);
+
+      // Check for remote switch request
+      if (Firebase.getBool(fbdo, "/status/pump_switch_request")) {
+          bool requestedState = fbdo.boolData();
+          if (requestedState != lastSwitchState) {
+              setShellyState(requestedState);
+          }
+      }
   }
 
   updateDisplay();

@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.compose.material3.ButtonDefaults
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
@@ -105,7 +106,8 @@ data class SepticState(
     val isWifiConnected: Boolean = false,
     val recentReadings: List<RecentReading> = emptyList(),
     val tankEmptyInches: Float = 55f,
-    val tankFullInches: Float = 10f
+    val tankFullInches: Float = 10f,
+    val pumpSwitchState: Boolean = true
 )
 
 class SepticViewModel : ViewModel() {
@@ -131,15 +133,16 @@ class SepticViewModel : ViewModel() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 println("SepticMonitor: Data changed! Snapshot: ${snapshot.value}")
                 
-                // This runs whenever you change data in the Firebase Console!
-                val tankPercent = snapshot.child("tank_percent").getValue(Int::class.java)
-                val distanceInches = snapshot.child("distance_inches").getValue(Int::class.java) ?: 0
+                // Use Any? and safe conversion to handle both Integer and Double from Firebase console
+                val tankPercent = snapshot.child("tank_percent").getValue(Any::class.java)?.toString()?.toDoubleOrNull()?.toInt()
+                val distanceInches = snapshot.child("distance_inches").getValue(Any::class.java)?.toString()?.toFloatOrNull() ?: 0f
                 val pumpStatus = snapshot.child("pump_status").getValue(String::class.java) ?: "Idle"
                 val pumpPower = snapshot.child("pump_power").getValue(String::class.java) ?: "Available"
                 val pumpDuration = snapshot.child("pump_run_duration").getValue(String::class.java) ?: "N/A"
+                val switchState = snapshot.child("pump_switch_state").getValue(Boolean::class.java) ?: true
 
                 if (tankPercent == null) {
-                    println("SepticMonitor: tank_percent is null. Make sure it is inside 'status' folder.")
+                    println("SepticMonitor: tank_percent is missing in 'status' folder.")
                     return
                 }
 
@@ -154,12 +157,13 @@ class SepticViewModel : ViewModel() {
                     val isNewReading = currentState.tankPercent != tankPercent
                     
                     currentState.copy(
-                        distanceInches = distanceInches,
+                        distanceInches = distanceInches.toInt(),
                         tankPercent = tankPercent,
                         statusText = newStatus,
                         pumpStatus = pumpStatus,
                         pumpPowerStatus = pumpPower,
                         pumpRunDuration = pumpDuration,
+                        pumpSwitchState = switchState,
                         lastReadingText = "Live from Cloud",
                         isWifiConnected = true,
                         recentReadings = if (isNewReading) {
@@ -186,8 +190,9 @@ class SepticViewModel : ViewModel() {
     private fun setupSettingsListener() {
         settingsRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val empty = snapshot.child("tank_empty").getValue(Float::class.java) ?: 55f
-                val full = snapshot.child("tank_full").getValue(Float::class.java) ?: 10f
+                // Robust parsing for manual Firebase console edits
+                val empty = snapshot.child("tank_empty").getValue(Any::class.java)?.toString()?.toFloatOrNull() ?: 55f
+                val full = snapshot.child("tank_full").getValue(Any::class.java)?.toString()?.toFloatOrNull() ?: 10f
                 
                 _uiState.update { it.copy(tankEmptyInches = empty, tankFullInches = full) }
             }
@@ -214,6 +219,10 @@ class SepticViewModel : ViewModel() {
             "tank_full" to full
         )
         settingsRef.setValue(settings)
+    }
+
+    fun togglePumpPower(isOn: Boolean) {
+        statusRef.child("pump_switch_request").setValue(isOn)
     }
 
     fun refreshData() {
@@ -375,7 +384,8 @@ fun SepticMonitorApp(viewModel: SepticViewModel = viewModel()) {
                 "dashboard" -> SepticDashboard(
                     state = uiState,
                     onRefresh = { viewModel.refreshData() },
-                    onOpenSettings = { currentScreen = "settings" }
+                    onOpenSettings = { currentScreen = "settings" },
+                    onTogglePump = { isOn -> viewModel.togglePumpPower(isOn) }
                 )
                 "settings" -> SettingsScreen(
                     state = uiState,
@@ -452,7 +462,8 @@ fun CustomSplashScreen(
 fun SepticDashboard(
     state: SepticState,
     onRefresh: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onTogglePump: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -513,7 +524,9 @@ fun SepticDashboard(
             pumpStatus = state.pumpStatus,
             pumpLastRun = state.pumpLastRun,
             pumpRunDuration = state.pumpRunDuration,
-            onRefresh = onRefresh
+            switchState = state.pumpSwitchState,
+            onRefresh = onRefresh,
+            onToggleSwitch = onTogglePump
         )
 
         AlertCard(
@@ -643,7 +656,9 @@ fun PumpPowerMonitorCard(
     pumpStatus: String,
     pumpLastRun: String,
     pumpRunDuration: String,
-    onRefresh: () -> Unit
+    switchState: Boolean,
+    onRefresh: () -> Unit,
+    onToggleSwitch: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -682,6 +697,40 @@ fun PumpPowerMonitorCard(
                     color = if (pumpPowerStatus == "Online") Color(0xFF2ECC71) else Color(0xFFE74C3C)
                 )
             }
+
+            // --- New Toggle Switch Section ---
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF263238), RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = if (switchState) "PUMP POWER IS ON" else "PUMP POWER IS OFF",
+                        color = if (switchState) Color(0xFF2ECC71) else Color(0xFFE74C3C),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Emergency remote switch",
+                        color = Color(0xFFB8C7D9),
+                        fontSize = 12.sp
+                    )
+                }
+
+                Button(
+                    onClick = { onToggleSwitch(!switchState) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (switchState) Color(0xFFE74C3C) else Color(0xFF2ECC71)
+                    )
+                ) {
+                    Text(if (switchState) "Turn OFF" else "Turn ON")
+                }
+            }
+            // --------------------------------
 
             PumpInfoRow(
                 label = "Power",
@@ -985,8 +1034,14 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSave: (Float, Float) -> Unit
 ) {
-    var tankEmpty by remember { mutableStateOf(state.tankEmptyInches.toString()) }
-    var tankFull by remember { mutableStateOf(state.tankFullInches.toString()) }
+    var tankEmpty by remember { mutableStateOf("") }
+    var tankFull by remember { mutableStateOf("") }
+
+    // Sync local text fields with cloud state if they haven't been edited yet
+    LaunchedEffect(state.tankEmptyInches, state.tankFullInches) {
+        if (tankEmpty.isEmpty() || tankEmpty == "0.0") tankEmpty = state.tankEmptyInches.toString()
+        if (tankFull.isEmpty() || tankFull == "0.0") tankFull = state.tankFullInches.toString()
+    }
 
     Column(
         modifier = Modifier
